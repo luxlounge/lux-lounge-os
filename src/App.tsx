@@ -2,23 +2,25 @@ import React from "react"
 import { createContext, Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthContext, useAuthState } from './hooks/useAuth'
+import { ThemeProvider } from './contexts/ThemeContext'
+import { ToastProvider } from './components/ui/Toast'
 import { Layout } from './components/Layout'
 import { Spinner } from './components/ui/Spinner'
 import type { Profile } from './types'
 
-const LoginPage = lazy(() => import('./pages/LoginPage'))
+const LoginPage    = lazy(() => import('./pages/LoginPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
-const MesasPage = lazy(() => import('./pages/MesasPage'))
-const ComandaPage = lazy(() => import('./pages/ComandaPage'))
-const PedidosPage = lazy(() => import('./pages/PedidosPage'))
+const MesasPage    = lazy(() => import('./pages/MesasPage'))
+const ComandaPage  = lazy(() => import('./pages/ComandaPage'))
+const PedidosPage  = lazy(() => import('./pages/PedidosPage'))
 const ProdutosPage = lazy(() => import('./pages/ProdutosPage'))
-const EstoquePage = lazy(() => import('./pages/EstoquePage'))
-const ConfigPage = lazy(() => import('./pages/ConfigPage'))
-const QRMenuPage = lazy(() => import('./pages/qr/QRMenuPage'))
+const EstoquePage  = lazy(() => import('./pages/EstoquePage'))
+const ConfigPage   = lazy(() => import('./pages/ConfigPage'))
+const QRMenuPage   = lazy(() => import('./pages/qr/QRMenuPage'))
 
 function Loading() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-dark">
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
       <Spinner size={36} />
     </div>
   )
@@ -36,37 +38,36 @@ export default function App() {
   const authState = useAuthState()
 
   return (
-    <AuthContext.Provider value={authState}>
-      <BrowserRouter>
-        <Suspense fallback={<Loading />}>
-          <Routes>
-            {/* Public QR route */}
-            <Route path="/m/:mesaNumber" element={<QRMenuPage />} />
-
-            {/* Auth */}
-            <Route path="/login" element={
-              authState.session ? <Navigate to="/" replace /> : <LoginPage />
-            } />
-
-            {/* Protected app */}
-            <Route path="/*" element={
-              <PrivateRoute>
-                <Layout>
-                  <Routes>
-                    <Route path="/" element={<DashboardPage />} />
-                    <Route path="/mesas" element={<MesasPage />} />
-                    <Route path="/comanda/:id" element={<ComandaPage />} />
-                    <Route path="/pedidos" element={<PedidosPage />} />
-                    <Route path="/produtos" element={<ProdutosPage />} />
-                    <Route path="/estoque" element={<EstoquePage />} />
-                    <Route path="/config" element={<ConfigPage />} />
-                  </Routes>
-                </Layout>
-              </PrivateRoute>
-            } />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
-    </AuthContext.Provider>
+    <ThemeProvider>
+      <ToastProvider>
+      <AuthContext.Provider value={authState}>
+        <BrowserRouter>
+          <Suspense fallback={<Loading />}>
+            <Routes>
+              <Route path="/m/:mesaNumber" element={<QRMenuPage />} />
+              <Route path="/login" element={
+                authState.session ? <Navigate to="/" replace /> : <LoginPage />
+              } />
+              <Route path="/*" element={
+                <PrivateRoute>
+                  <Layout>
+                    <Routes>
+                      <Route path="/"         element={<DashboardPage />} />
+                      <Route path="/mesas"    element={<MesasPage />} />
+                      <Route path="/comanda/:id" element={<ComandaPage />} />
+                      <Route path="/pedidos"  element={<PedidosPage />} />
+                      <Route path="/produtos" element={<ProdutosPage />} />
+                      <Route path="/estoque"  element={<EstoquePage />} />
+                      <Route path="/config"   element={<ConfigPage />} />
+                    </Routes>
+                  </Layout>
+                </PrivateRoute>
+              } />
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </AuthContext.Provider>
+      </ToastProvider>
+    </ThemeProvider>
   )
 }

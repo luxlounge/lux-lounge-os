@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import type { Product, Categoria } from '../types'
 import { Modal } from '../components/ui/Modal'
 import { Spinner } from '../components/ui/Spinner'
-import { Plus, Edit2, Search, Wind } from 'lucide-react'
+import { Plus, Edit2, Search, Wind, ShoppingBag } from 'lucide-react'
 
 export default function ProdutosPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -56,46 +56,98 @@ export default function ProdutosPage() {
     return matchSearch && matchCat
   })
 
-  if (loading) return <div className="flex justify-center items-center h-screen bg-ink"><Spinner size={32} /></div>
+  if (loading) return (
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <div className="px-4 md:px-8 pt-6 pb-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+        <h1 className="page-header">Produtos</h1>
+      </div>
+      <div className="flex items-center justify-center h-48"><Spinner size={28} /></div>
+    </div>
+  )
 
   return (
-    <div className="min-h-screen bg-ink pb-24 md:pb-6">
-      <div className="sticky top-0 z-20 bg-ink/95 backdrop-blur-sm border-b border-ink-border px-4 pt-4 pb-3">
+    <div className="min-h-screen pb-24 md:pb-6" style={{ background: 'var(--bg-base)' }}>
+
+      {/* Header */}
+      <div className="sticky top-0 z-20 px-4 md:px-8 pt-5 pb-3"
+        style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-3">
           <h1 className="page-header">Produtos</h1>
-          <button onClick={openNew} className="btn-primary btn-sm"><Plus size={14} /> Novo</button>
+          <button onClick={openNew} className="btn-primary btn-sm">
+            <Plus size={14} /> Novo
+          </button>
         </div>
         <div className="relative mb-3">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#444]" />
-          <input className="input pl-9 text-sm" placeholder="Buscar produto..." value={search} onChange={e => setSearch(e.target.value)} />
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+          <input className="input pl-9 text-sm" placeholder="Buscar produto..."
+            value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
-          <button onClick={() => setSelCat(null)} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition ${selCat === null ? 'bg-gold text-ink' : 'bg-ink-raised border border-ink-border text-[#555] hover:text-white'}`}>Todos</button>
+          <button onClick={() => setSelCat(null)}
+            className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition"
+            style={{
+              background: selCat === null ? 'var(--gold)' : 'var(--bg-raised)',
+              color: selCat === null ? 'var(--gold-fg)' : 'var(--text-secondary)',
+              border: `1px solid ${selCat === null ? 'transparent' : 'var(--border-default)'}`,
+            }}>
+            Todos
+          </button>
           {categories.map(c => (
-            <button key={c.id} onClick={() => setSelCat(c.id)} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition ${selCat === c.id ? 'bg-gold text-ink' : 'bg-ink-raised border border-ink-border text-[#555] hover:text-white'}`}>{c.nome}</button>
+            <button key={c.id} onClick={() => setSelCat(c.id)}
+              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition"
+              style={{
+                background: selCat === c.id ? 'var(--gold)' : 'var(--bg-raised)',
+                color: selCat === c.id ? 'var(--gold-fg)' : 'var(--text-secondary)',
+                border: `1px solid ${selCat === c.id ? 'transparent' : 'var(--border-default)'}`,
+              }}>
+              {c.nome}
+            </button>
           ))}
         </div>
       </div>
 
-      <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {filtered.map(p => (
-          <div key={p.id} className={`bg-ink-card border border-ink-border rounded-2xl flex items-center justify-between gap-3 p-4 ${!p.active ? 'opacity-40' : ''}`}>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <p className="font-semibold text-sm text-white truncate">{p.nome}</p>
-                {p.is_rosh && <Wind size={11} className="text-gold shrink-0" />}
-              </div>
-              <p className="text-xs text-[#444] mt-0.5">{(p as any).categorias?.nome ?? '—'}</p>
-              <div className="flex items-center gap-2.5 mt-1.5">
-                <span className="text-gold font-bold text-sm">R$ {Number(p.preco).toFixed(2).replace('.', ',')}</span>
-                <span className={`badge text-[10px] ${p.stock_quantity < 5 ? 'badge-red' : 'badge-gray'}`}>{p.stock_quantity} un</span>
-              </div>
+      {/* Products grid */}
+      <div className="p-4 md:p-8">
+        {filtered.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-3"
+              style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
+              <ShoppingBag size={20} style={{ color: 'var(--text-muted)' }} />
             </div>
-            <button onClick={() => openEdit(p)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-ink-raised border border-ink-border text-[#444] hover:text-white transition shrink-0">
-              <Edit2 size={13} />
-            </button>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Nenhum produto encontrado</p>
           </div>
-        ))}
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filtered.map(p => (
+            <div key={p.id} className="card flex items-center justify-between gap-3"
+              style={{ opacity: p.active ? 1 : 0.45 }}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                    {p.nome}
+                  </p>
+                  {p.is_rosh && <Wind size={11} style={{ color: 'var(--gold)', flexShrink: 0 }} />}
+                </div>
+                <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                  {(p as any).categorias?.nome ?? '—'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-sm" style={{ color: 'var(--gold)' }}>
+                    R$ {Number(p.preco).toFixed(2).replace('.', ',')}
+                  </span>
+                  <span className={`badge ${p.stock_quantity < 5 ? 'badge-yellow' : 'badge-gray'} text-[10px]`}>
+                    {p.stock_quantity} un
+                  </span>
+                </div>
+              </div>
+              <button onClick={() => openEdit(p)}
+                className="w-8 h-8 flex items-center justify-center rounded-xl transition shrink-0"
+                style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
+                <Edit2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Editar Produto' : 'Novo Produto'}>
@@ -114,8 +166,9 @@ export default function ProdutosPage() {
             <div><label className="label">Estoque</label><input type="number" className="input" value={form.stock_quantity} onChange={e => setForm(f => ({ ...f, stock_quantity: e.target.value }))} /></div>
             <div className="flex flex-col gap-2 justify-end pb-1">
               {[{ key: 'active', label: 'Ativo' }, { key: 'is_rosh', label: 'É Rosh' }, { key: 'exibe_cardapio', label: 'Cardápio' }].map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2 text-sm cursor-pointer text-[#888]">
-                  <input type="checkbox" checked={form[key as keyof typeof form] as boolean} onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))} className="w-3.5 h-3.5 accent-gold" />
+                <label key={key} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                  <input type="checkbox" checked={form[key as keyof typeof form] as boolean} onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))}
+                    className="w-3.5 h-3.5" style={{ accentColor: 'var(--gold)' }} />
                   {label}
                 </label>
               ))}
@@ -125,7 +178,7 @@ export default function ProdutosPage() {
             <div><label className="label">Carvão por Rosh</label><input type="number" className="input" value={form.carvao_por_rosh} onChange={e => setForm(f => ({ ...f, carvao_por_rosh: e.target.value }))} /></div>
           )}
           <button onClick={save} disabled={!form.nome || !form.preco || saving} className="btn-primary w-full py-3.5">
-            {saving ? <Spinner size={18} /> : editing ? 'Salvar' : 'Criar Produto'}
+            {saving ? <Spinner size={18} /> : editing ? 'Salvar Alterações' : 'Criar Produto'}
           </button>
         </div>
       </Modal>

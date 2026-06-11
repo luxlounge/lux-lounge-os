@@ -49,38 +49,65 @@ export default function EstoquePage() {
     load()
   }
 
-  if (loading) return <div className="flex justify-center items-center h-screen bg-ink"><Spinner size={32} /></div>
-
   const lowStock = products.filter(p => p.stock_quantity < 5)
 
+  if (loading) return (
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <div className="px-4 md:px-8 pt-6 pb-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+        <h1 className="page-header">Estoque</h1>
+      </div>
+      <div className="flex items-center justify-center h-48"><Spinner size={28} /></div>
+    </div>
+  )
+
+  const tipoConfig = {
+    entrada: { icon: ArrowUp,   color: 'var(--green)', bg: 'var(--green-bg)', border: 'var(--green-border)', label: 'Entrada' },
+    saida:   { icon: ArrowDown, color: 'var(--red)',   bg: 'var(--red-bg)',   border: 'var(--red-border)',   label: 'Saída' },
+    ajuste:  { icon: RefreshCw, color: 'var(--blue)',  bg: 'var(--blue-bg)', border: 'var(--blue-border)',  label: 'Ajuste' },
+  }
+
   return (
-    <div className="min-h-screen bg-ink pb-24 md:pb-6">
-      <div className="sticky top-0 z-20 bg-ink/95 backdrop-blur-sm border-b border-ink-border px-4 pt-4 pb-3">
+    <div className="min-h-screen pb-24 md:pb-6" style={{ background: 'var(--bg-base)' }}>
+
+      {/* Header */}
+      <div className="sticky top-0 z-20 px-4 md:px-8 pt-5 pb-3"
+        style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-3">
           <h1 className="page-header">Estoque</h1>
           <div className="flex gap-2">
-            <button onClick={load} className="w-9 h-9 flex items-center justify-center rounded-xl bg-ink-raised border border-ink-border text-[#555] hover:text-white transition">
-              <RefreshCw size={15} />
+            <button onClick={load}
+              className="w-9 h-9 flex items-center justify-center rounded-xl transition"
+              style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
+              <RefreshCw size={14} />
             </button>
-            <button onClick={() => setModalOpen(true)} className="btn-primary btn-sm"><Plus size={14} /> Movimento</button>
+            <button onClick={() => setModalOpen(true)} className="btn-primary btn-sm">
+              <Plus size={14} /> Movimento
+            </button>
           </div>
         </div>
         <div className="flex gap-2">
           {(['stock', 'movements'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition ${tab === t ? 'bg-gold text-ink' : 'bg-ink-raised border border-ink-border text-[#555] hover:text-white'}`}>
+              className="px-3.5 py-1.5 rounded-full text-xs font-semibold transition"
+              style={{
+                background: tab === t ? 'var(--gold)' : 'var(--bg-raised)',
+                color: tab === t ? 'var(--gold-fg)' : 'var(--text-secondary)',
+                border: `1px solid ${tab === t ? 'transparent' : 'var(--border-default)'}`,
+              }}>
               {t === 'stock' ? 'Produtos' : 'Movimentações'}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
-        {lowStock.length > 0 && (
-          <div className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4">
+      <div className="p-4 md:p-8 space-y-4">
+        {/* Low stock alert */}
+        {lowStock.length > 0 && tab === 'stock' && (
+          <div className="rounded-xl p-4"
+            style={{ background: 'var(--amber-bg)', border: '1px solid var(--amber-border)' }}>
             <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle size={14} className="text-amber-400" />
-              <span className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Estoque Baixo</span>
+              <AlertTriangle size={13} style={{ color: 'var(--amber)' }} />
+              <span className="section-header" style={{ color: 'var(--amber)' }}>Estoque Crítico</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {lowStock.map(p => (
@@ -93,62 +120,67 @@ export default function EstoquePage() {
         {tab === 'stock' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {products.length === 0 && (
-              <div className="col-span-full flex flex-col items-center justify-center py-16 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-ink-card border border-ink-border flex items-center justify-center mb-3">
-                  <Package size={20} className="text-[#2A2A2A]" />
+              <div className="col-span-full flex flex-col items-center py-16">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-3"
+                  style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
+                  <Package size={20} style={{ color: 'var(--text-muted)' }} />
                 </div>
-                <p className="text-[#444] text-sm">Nenhum produto ativo</p>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Nenhum produto</p>
               </div>
             )}
-            {products.map(p => (
-              <div key={p.id} className="bg-ink-card border border-ink-border rounded-2xl flex items-center justify-between gap-3 p-4">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm text-white truncate">{p.nome}</p>
-                  <p className="text-xs text-[#444] mt-0.5">{(p as any).categorias?.nome ?? '—'}</p>
+            {products.map(p => {
+              const stockColor = p.stock_quantity === 0 ? 'var(--red)' : p.stock_quantity < 5 ? 'var(--amber)' : 'var(--green)'
+              const stockBadge = p.stock_quantity === 0 ? 'badge-red' : p.stock_quantity < 5 ? 'badge-yellow' : 'badge-green'
+              return (
+                <div key={p.id} className="card flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: stockColor }} />
+                      <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>{p.nome}</p>
+                    </div>
+                    <p className="text-xs pl-4" style={{ color: 'var(--text-muted)' }}>{(p as any).categorias?.nome ?? '—'}</p>
+                  </div>
+                  <span className={`badge ${stockBadge} font-mono`}>{p.stock_quantity} un</span>
                 </div>
-                <span className={`badge text-sm px-3 py-1 ${
-                  p.stock_quantity === 0 ? 'badge-red' :
-                  p.stock_quantity < 5 ? 'badge-yellow' : 'badge-gray'
-                }`}>
-                  {p.stock_quantity} un
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
         {tab === 'movements' && (
           <div className="space-y-2">
             {movements.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <p className="text-[#444] text-sm">Nenhuma movimentação registrada</p>
+              <div className="flex flex-col items-center py-16">
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Nenhuma movimentação</p>
               </div>
             )}
-            {movements.map(m => (
-              <div key={m.id} className="bg-ink-card border border-ink-border rounded-2xl flex items-center gap-3 p-4">
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  m.tipo === 'entrada' ? 'bg-emerald-500/10' :
-                  m.tipo === 'saida' ? 'bg-red-500/10' : 'bg-blue-500/10'
-                }`}>
-                  {m.tipo === 'entrada' ? <ArrowUp size={14} className="text-emerald-400" /> :
-                   m.tipo === 'saida' ? <ArrowDown size={14} className="text-red-400" /> :
-                   <RefreshCw size={14} className="text-blue-400" />}
+            {movements.map(m => {
+              const cfg = tipoConfig[m.tipo as keyof typeof tipoConfig]
+              const Icon = cfg.icon
+              const sign = m.tipo === 'entrada' ? '+' : m.tipo === 'saida' ? '−' : ''
+              return (
+                <div key={m.id} className="card flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                    <Icon size={14} style={{ color: cfg.color }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                      {(m as any).products?.nome ?? '—'}
+                    </p>
+                    {m.motivo && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.motivo}</p>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="font-mono font-bold text-sm" style={{ color: cfg.color }}>
+                      {sign}{m.quantidade}
+                    </p>
+                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      {format(new Date(m.created_at), 'dd/MM HH:mm')}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">{(m as any).products?.nome ?? '—'}</p>
-                  {m.motivo && <p className="text-xs text-[#444] mt-0.5">{m.motivo}</p>}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className={`font-bold text-sm ${
-                    m.tipo === 'entrada' ? 'text-emerald-400' :
-                    m.tipo === 'saida' ? 'text-red-400' : 'text-blue-400'
-                  }`}>
-                    {m.tipo === 'entrada' ? '+' : m.tipo === 'saida' ? '−' : ''}{m.quantidade}
-                  </p>
-                  <p className="text-[11px] text-[#444]">{format(new Date(m.created_at), 'dd/MM HH:mm')}</p>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -165,29 +197,35 @@ export default function EstoquePage() {
           <div>
             <label className="label">Tipo</label>
             <div className="grid grid-cols-3 gap-2">
-              {(['entrada', 'saida', 'ajuste'] as const).map(t => (
-                <button key={t} onClick={() => setForm(f => ({ ...f, tipo: t }))}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold capitalize transition ${
-                    form.tipo === t
-                      ? t === 'entrada' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                        : t === 'saida' ? 'border-red-500/40 bg-red-500/10 text-red-400'
-                        : 'border-blue-500/40 bg-blue-500/10 text-blue-400'
-                      : 'border-ink-border bg-ink-raised text-[#555] hover:text-white'
-                  }`}>
-                  {t}
-                </button>
-              ))}
+              {(['entrada', 'saida', 'ajuste'] as const).map(t => {
+                const cfg = tipoConfig[t]
+                const active = form.tipo === t
+                return (
+                  <button key={t} onClick={() => setForm(f => ({ ...f, tipo: t }))}
+                    className="p-2.5 rounded-xl text-xs font-semibold capitalize transition"
+                    style={{
+                      background: active ? cfg.bg : 'var(--bg-raised)',
+                      border: `1px solid ${active ? cfg.border : 'var(--border-default)'}`,
+                      color: active ? cfg.color : 'var(--text-secondary)',
+                    }}>
+                    {cfg.label}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <div>
             <label className="label">{form.tipo === 'ajuste' ? 'Quantidade Final' : 'Quantidade'}</label>
-            <input type="number" min="1" className="input" value={form.quantidade} onChange={e => setForm(f => ({ ...f, quantidade: e.target.value }))} />
+            <input type="number" min="1" className="input" value={form.quantidade}
+              onChange={e => setForm(f => ({ ...f, quantidade: e.target.value }))} />
           </div>
           <div>
             <label className="label">Observações</label>
-            <input className="input" placeholder="Opcional..." value={form.motivo} onChange={e => setForm(f => ({ ...f, motivo: e.target.value }))} />
+            <input className="input" placeholder="Opcional..." value={form.motivo}
+              onChange={e => setForm(f => ({ ...f, motivo: e.target.value }))} />
           </div>
-          <button onClick={saveMovement} disabled={!form.product_id || !form.quantidade || saving} className="btn-primary w-full py-3.5">
+          <button onClick={saveMovement} disabled={!form.product_id || !form.quantidade || saving}
+            className="btn-primary w-full py-3.5">
             {saving ? <Spinner size={18} /> : 'Confirmar'}
           </button>
         </div>
