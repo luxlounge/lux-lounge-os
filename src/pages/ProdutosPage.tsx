@@ -121,6 +121,11 @@ export default function ProdutosPage() {
           {filtered.map(p => (
             <div key={p.id} className="card flex items-center justify-between gap-3"
               style={{ opacity: p.active ? 1 : 0.45 }}>
+              {p.imagem_url && (
+                <img src={p.imagem_url} alt={p.nome}
+                  className="w-12 h-12 rounded-xl object-cover shrink-0"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+              )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>

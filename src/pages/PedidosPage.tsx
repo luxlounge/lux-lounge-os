@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Pedido, PedidoItem } from '../types'
 import { Spinner } from '../components/ui/Spinner'
-import { Clock } from 'lucide-react'
+import { Clock, Search } from 'lucide-react'
 import { format } from 'date-fns'
 
 const COLUMNS = [
@@ -27,6 +27,7 @@ export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<(Pedido & { mesa_numero?: number })[]>([])
   const [loading, setLoading] = useState(true)
   const [advancing, setAdvancing] = useState<number | null>(null)
+  const [search, setSearch] = useState('')
 
   const load = useCallback(async () => {
     const { data } = await supabase
@@ -82,7 +83,14 @@ export default function PedidosPage() {
       {/* Header */}
       <div className="sticky top-0 z-20 px-4 md:px-8 pt-5 pb-4 shrink-0"
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
-        <h1 className="page-header">Pedidos</h1>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="page-header">Pedidos</h1>
+          <div className="relative">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+            <input className="input pl-8 text-sm py-1.5" placeholder="Mesa..." style={{ width: 100 }}
+              value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+        </div>
 
         {/* Column headers — visible on mobile as legend */}
         <div className="flex gap-4 mt-3">
@@ -106,7 +114,10 @@ export default function PedidosPage() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex gap-0 w-full overflow-x-auto snap-x snap-mandatory md:overflow-x-visible md:grid md:grid-cols-3">
           {COLUMNS.map(col => {
-            const colPedidos = pedidos.filter(p => p.status === col.key)
+            const colPedidos = pedidos.filter(p =>
+                p.status === col.key &&
+                (!search.trim() || String(p.mesa_numero ?? '').includes(search.trim()))
+              )
             return (
               <div key={col.key}
                 className="flex flex-col shrink-0 w-[85vw] md:w-auto snap-start"

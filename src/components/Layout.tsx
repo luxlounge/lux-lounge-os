@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, ClipboardList,
   ShoppingBag, Package, Settings, LogOut,
-  Menu, X, Sun, Moon,
+  Menu, X, Sun, Moon, Landmark,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
@@ -10,12 +10,13 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
 
 const navItems = [
-  { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/mesas',    icon: LayoutGrid,      label: 'Mesas' },
-  { to: '/pedidos',  icon: ClipboardList,   label: 'Pedidos' },
-  { to: '/produtos', icon: ShoppingBag,     label: 'Produtos' },
-  { to: '/estoque',  icon: Package,         label: 'Estoque' },
-  { to: '/config',   icon: Settings,        label: 'Config' },
+  { to: '/',         icon: LayoutDashboard, label: 'Dashboard', roles: [] },
+  { to: '/mesas',    icon: LayoutGrid,      label: 'Mesas',     roles: [] },
+  { to: '/caixa',    icon: Landmark,        label: 'Caixa',     roles: ['admin', 'caixa'] },
+  { to: '/pedidos',  icon: ClipboardList,   label: 'Pedidos',   roles: [] },
+  { to: '/produtos', icon: ShoppingBag,     label: 'Produtos',  roles: [] },
+  { to: '/estoque',  icon: Package,         label: 'Estoque',   roles: ['admin', 'caixa'] },
+  { to: '/config',   icon: Settings,        label: 'Config',    roles: ['admin'] },
 ]
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -30,10 +31,9 @@ export function Layout({ children }: { children: ReactNode }) {
     navigate('/login')
   }
 
-  const filtered = navItems.filter(item => {
-    if (profile?.role === 'operador' && ['/estoque', '/config'].includes(item.to)) return false
-    return true
-  })
+  const filtered = navItems.filter(item =>
+    item.roles.length === 0 || item.roles.includes(profile?.role ?? '')
+  )
 
   const isActive = (to: string) =>
     location.pathname === to || (to !== '/' && location.pathname.startsWith(to))
@@ -142,7 +142,7 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* ── Mobile bottom nav ── */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex"
         style={{ background: 'var(--bg-topbar)', borderBottom: '1px solid var(--border-subtle)', borderTop: '1px solid var(--border-subtle)' }}>
-        {filtered.slice(0, 5).map(({ to, icon: Icon, label }) => {
+        {filtered.map(({ to, icon: Icon, label }) => {
           const active = isActive(to)
           return (
             <Link key={to} to={to}

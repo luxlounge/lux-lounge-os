@@ -7,21 +7,22 @@ import { Spinner } from '../components/ui/Spinner'
 import { useAuth } from '../hooks/useAuth'
 import {
   ArrowLeft, Plus, CreditCard, Banknote, Smartphone, DollarSign,
-  ArrowRightLeft, CheckCircle, Package, X, ChevronRight
+  ArrowRightLeft, CheckCircle, Package, X, ChevronRight, Gift,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
-type PayMethod = 'dinheiro' | 'pix' | 'credito' | 'debito'
+type PayMethod = 'dinheiro' | 'pix' | 'credito' | 'debito' | 'cortesia'
 
 const METHOD_ICON: Record<PayMethod, React.ReactNode> = {
   dinheiro: <Banknote size={16} />,
-  pix: <Smartphone size={16} />,
-  credito: <CreditCard size={16} />,
-  debito: <CreditCard size={16} />,
+  pix:      <Smartphone size={16} />,
+  credito:  <CreditCard size={16} />,
+  debito:   <CreditCard size={16} />,
+  cortesia: <Gift size={16} />,
 }
 const METHOD_LABEL: Record<PayMethod, string> = {
-  dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Crédito', debito: 'Débito',
+  dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Crédito', debito: 'Débito', cortesia: 'Cortesia',
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -91,8 +92,12 @@ export default function ComandaPage() {
     load()
   }
 
-  async function closeComanda() {
+  async function closeComanda(force = false) {
     if (!comanda) return
+    const openOrders = pedidos.filter(p => ['pendente', 'preparo'].includes(p.status))
+    if (!force && openOrders.length > 0) {
+      if (!confirm(`Há ${openOrders.length} pedido(s) ainda em preparo. Fechar mesmo assim?`)) return
+    }
     setSaving(true)
     const { error } = await supabase.rpc('fn_fechar_comanda', { p_comanda_id: comanda.id })
     setSaving(false)
@@ -114,74 +119,78 @@ export default function ComandaPage() {
   }
 
   if (loading) return (
-    <div className="flex items-center justify-center h-screen bg-ink">
+    <div className="flex items-center justify-center h-screen" style={{ background: 'var(--bg-base)' }}>
       <Spinner size={32} />
     </div>
   )
   if (!comanda) return (
-    <div className="flex items-center justify-center h-screen bg-ink text-[#555]">Comanda não encontrada</div>
+    <div className="flex items-center justify-center h-screen" style={{ background: 'var(--bg-base)', color: 'var(--text-muted)' }}>
+      Comanda não encontrada
+    </div>
   )
 
   const mesaNumero = (comanda as any).mesas?.numero ?? '?'
   const balance = comanda.total - comanda.total_pago
   const canAct = ['admin', 'caixa'].includes(profile?.role ?? '') && comanda.status === 'aberta'
+  const canForceClose = profile?.role === 'admin' && comanda.status === 'aberta' && balance > 0.01
   const isClosed = comanda.status === 'fechada'
 
   return (
-    <div className="min-h-screen bg-ink pb-24 md:pb-6">
+    <div className="min-h-screen pb-24 md:pb-6" style={{ background: 'var(--bg-base)' }}>
+
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-ink/95 backdrop-blur-sm border-b border-ink-border">
+      <div className="sticky top-0 z-20 backdrop-blur-sm"
+        style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center gap-3 px-4 py-3">
           <button onClick={() => navigate('/mesas')}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-ink-raised border border-ink-border text-[#555] hover:text-white transition active:scale-95">
+            className="w-9 h-9 flex items-center justify-center rounded-xl transition"
+            style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
             <ArrowLeft size={17} />
           </button>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="font-display font-bold text-white text-lg">Mesa {mesaNumero}</h1>
-              <span className="text-[#3A3A3A]">·</span>
-              <span className="text-[#555] text-sm">#{comanda.id}</span>
+              <h1 className="font-mono font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
+                Mesa {mesaNumero}
+              </h1>
+              <span style={{ color: 'var(--border-strong)' }}>·</span>
+              <span className="text-sm font-mono" style={{ color: 'var(--text-muted)' }}>#{comanda.id}</span>
             </div>
-            <p className="text-xs text-[#444]">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {format(new Date(comanda.aberta_em), "dd/MM 'às' HH:mm", { locale: ptBR })}
             </p>
           </div>
-          {isClosed && <span className="badge-gray text-[10px] badge">Fechada</span>}
-          {!isClosed && (
-            <span className="flex items-center gap-1.5 text-xs text-gold">
-              <span className="w-1.5 h-1.5 rounded-full bg-gold pulse-dot" />
-              Aberta
-            </span>
-          )}
+          {isClosed
+            ? <span className="badge badge-gray text-[10px]">Fechada</span>
+            : <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--gold)' }}>
+                <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: 'var(--gold)' }} />
+                Aberta
+              </span>
+          }
         </div>
       </div>
 
       <div className="px-4 pt-4 space-y-4 max-w-xl mx-auto">
-        {/* Financial Summary */}
-        <div className="bg-ink-card border border-ink-border rounded-2xl overflow-hidden">
-          <div className="grid grid-cols-3 divide-x divide-ink-border">
-            <div className="px-4 py-5">
-              <p className="text-[10px] text-[#444] uppercase tracking-widest mb-1">Total</p>
-              <p className="font-display font-bold text-xl text-white">{fmt(comanda.total)}</p>
-            </div>
-            <div className="px-4 py-5">
-              <p className="text-[10px] text-[#444] uppercase tracking-widest mb-1">Pago</p>
-              <p className="font-display font-bold text-xl text-emerald-400">{fmt(comanda.total_pago)}</p>
-            </div>
-            <div className="px-4 py-5">
-              <p className="text-[10px] text-[#444] uppercase tracking-widest mb-1">Saldo</p>
-              <p className={`font-display font-bold text-xl ${balance > 0.01 ? 'text-gold' : 'text-emerald-400'}`}>
-                {fmt(balance)}
-              </p>
-            </div>
+
+        {/* Financial summary */}
+        <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+          <div className="grid grid-cols-3">
+            {[
+              { label: 'Total', value: fmt(comanda.total), color: 'var(--text-primary)' },
+              { label: 'Pago',  value: fmt(comanda.total_pago), color: 'var(--green)' },
+              { label: 'Saldo', value: fmt(balance), color: balance > 0.01 ? 'var(--gold)' : 'var(--green)' },
+            ].map(({ label, value, color }, i) => (
+              <div key={label} className="px-4 py-5"
+                style={{ borderRight: i < 2 ? '1px solid var(--border-subtle)' : 'none' }}>
+                <p className="text-[10px] uppercase tracking-widest mb-1" style={{ color: 'var(--text-muted)' }}>{label}</p>
+                <p className="font-mono font-bold text-xl" style={{ color }}>{value}</p>
+              </div>
+            ))}
           </div>
           {balance > 0.01 && (
             <div className="px-4 pb-3">
-              <div className="w-full bg-ink-raised rounded-full h-1">
-                <div
-                  className="bg-gold h-1 rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (comanda.total_pago / comanda.total) * 100)}%` }}
-                />
+              <div className="progress-bar">
+                <div className="progress-bar-fill"
+                  style={{ width: `${Math.min(100, (comanda.total_pago / comanda.total) * 100)}%` }} />
               </div>
             </div>
           )}
@@ -191,48 +200,56 @@ export default function ComandaPage() {
         {canAct && (
           <div className="grid grid-cols-2 gap-2.5">
             {[
-              { icon: Plus, label: 'Adicionar Pedido', sub: 'novo item', action: () => setAddOrderModal(true), highlight: true },
-              { icon: DollarSign, label: 'Registrar Pagamento', sub: balance > 0 ? fmt(balance) + ' pendente' : 'quitado', action: () => setPayModal(true), highlight: false },
-              { icon: ArrowRightLeft, label: 'Transferir Mesa', sub: `${mesasDisp.length} disponíveis`, action: () => setTransferModal(true), highlight: false },
-              { icon: CheckCircle, label: 'Fechar Comanda', sub: balance > 0.01 ? 'saldo pendente' : 'pronto', action: closeComanda, disabled: balance > 0.01 || saving, highlight: false },
+              { icon: Plus,          label: 'Adicionar Pedido',    sub: 'novo item',                              action: () => setAddOrderModal(true), highlight: true,  disabled: false },
+              { icon: DollarSign,    label: 'Registrar Pagamento', sub: balance > 0 ? fmt(balance)+' pendente' : 'quitado', action: () => setPayModal(true), highlight: false, disabled: false },
+              { icon: ArrowRightLeft,label: 'Transferir Mesa',     sub: `${mesasDisp.length} disponíveis`,        action: () => setTransferModal(true), highlight: false, disabled: false },
+              { icon: CheckCircle,   label: 'Fechar Comanda',      sub: balance > 0.01 ? 'saldo pendente' : 'pronto', action: () => closeComanda(), disabled: balance > 0.01 && !canForceClose, highlight: false },
             ].map(({ icon: Icon, label, sub, action, highlight, disabled }) => (
-              <button
-                key={label}
-                onClick={action}
-                disabled={disabled}
-                className={[
-                  'flex flex-col items-start p-4 rounded-2xl border transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-left',
-                  highlight
-                    ? 'bg-gold/10 border-gold/30 hover:bg-gold/15'
-                    : 'bg-ink-card border-ink-border hover:border-ink-border-2',
-                ].join(' ')}
-              >
-                <Icon size={18} className={highlight ? 'text-gold mb-2' : 'text-[#555] mb-2'} />
-                <span className={`text-sm font-semibold leading-tight ${highlight ? 'text-gold' : 'text-white'}`}>{label}</span>
-                <span className="text-[11px] text-[#444] mt-0.5">{sub}</span>
+              <button key={label} onClick={action} disabled={disabled}
+                className="flex flex-col items-start p-4 rounded-2xl transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                style={{
+                  background: highlight ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  border: `1px solid ${highlight ? 'var(--gold-border)' : 'var(--border-default)'}`,
+                }}>
+                <Icon size={18} className="mb-2" style={{ color: highlight ? 'var(--gold)' : 'var(--text-muted)' }} />
+                <span className="text-sm font-semibold leading-tight" style={{ color: highlight ? 'var(--gold)' : 'var(--text-primary)' }}>{label}</span>
+                <span className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{sub}</span>
               </button>
             ))}
           </div>
         )}
 
+        {/* Force close for admin when balance pending */}
+        {canForceClose && (
+          <button onClick={() => closeComanda(true)} disabled={saving}
+            className="btn-danger w-full py-2.5 text-sm">
+            {saving ? <Spinner size={15} /> : 'Fechar com Saldo Pendente (Admin)'}
+          </button>
+        )}
+
         {/* Payments */}
         {pagamentos.length > 0 && (
           <div>
-            <p className="text-[11px] text-[#444] uppercase tracking-widest mb-2 flex items-center gap-2">
-              Pagamentos
-              <span className="flex-1 h-px bg-ink-border" />
+            <p className="text-[11px] uppercase tracking-widest mb-2 flex items-center gap-2"
+              style={{ color: 'var(--text-muted)' }}>
+              Pagamentos <span className="flex-1 h-px" style={{ background: 'var(--border-subtle)' }} />
             </p>
-            <div className="bg-ink-card border border-ink-border rounded-2xl divide-y divide-ink-border overflow-hidden">
-              {pagamentos.map(p => (
-                <div key={p.id} className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-2.5 text-[#888]">
+            <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+              {pagamentos.map((p, i) => (
+                <div key={p.id} className="flex items-center justify-between px-4 py-3"
+                  style={{ borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none' }}>
+                  <div className="flex items-center gap-2.5" style={{ color: 'var(--text-secondary)' }}>
                     {METHOD_ICON[p.metodo as PayMethod]}
                     <div>
-                      <span className="text-sm text-white">{METHOD_LABEL[p.metodo as PayMethod] ?? p.metodo}</span>
-                      <p className="text-[11px] text-[#444]">{format(new Date(p.created_at), 'HH:mm')}</p>
+                      <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                        {METHOD_LABEL[p.metodo as PayMethod] ?? p.metodo}
+                      </span>
+                      <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                        {format(new Date(p.created_at), 'HH:mm')}
+                      </p>
                     </div>
                   </div>
-                  <span className="font-semibold text-emerald-400">{fmt(Number(p.valor))}</span>
+                  <span className="font-semibold font-mono" style={{ color: 'var(--green)' }}>{fmt(Number(p.valor))}</span>
                 </div>
               ))}
             </div>
@@ -241,14 +258,16 @@ export default function ComandaPage() {
 
         {/* Pedidos */}
         <div>
-          <p className="text-[11px] text-[#444] uppercase tracking-widest mb-2 flex items-center gap-2">
+          <p className="text-[11px] uppercase tracking-widest mb-2 flex items-center gap-2"
+            style={{ color: 'var(--text-muted)' }}>
             Pedidos ({pedidos.length})
-            <span className="flex-1 h-px bg-ink-border" />
+            <span className="flex-1 h-px" style={{ background: 'var(--border-subtle)' }} />
           </p>
           {pedidos.length === 0 && (
-            <div className="bg-ink-card border border-ink-border rounded-2xl flex flex-col items-center justify-center py-10 text-center">
-              <Package size={28} className="text-[#2A2A2A] mb-2" />
-              <p className="text-sm text-[#444]">Nenhum pedido ainda</p>
+            <div className="rounded-2xl flex flex-col items-center justify-center py-10 text-center"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+              <Package size={28} className="mb-2" style={{ color: 'var(--border-strong)' }} />
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Nenhum pedido ainda</p>
               {canAct && (
                 <button onClick={() => setAddOrderModal(true)} className="btn-secondary btn-sm mt-3">
                   <Plus size={13} /> Adicionar
@@ -258,14 +277,18 @@ export default function ComandaPage() {
           )}
           <div className="space-y-2">
             {pedidos.map(p => (
-              <div key={p.id} className="bg-ink-card border border-ink-border rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-ink-border">
+              <div key={p.id} className="rounded-2xl overflow-hidden"
+                style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+                <div className="flex items-center justify-between px-4 py-3"
+                  style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <div className="flex items-center gap-2">
-                    <span className="text-[#444] text-xs font-mono">#{p.id}</span>
+                    <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>#{p.id}</span>
                     {p.observacao && (
-                      <span className="text-xs text-[#666]">— {p.observacao}</span>
+                      <span className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>— {p.observacao}</span>
                     )}
-                    <span className="text-[#333] text-xs">{format(new Date(p.created_at), 'HH:mm')}</span>
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {format(new Date(p.created_at), 'HH:mm')}
+                    </span>
                   </div>
                   <span className={`badge ${STATUS_BADGE[p.status] ?? 'badge-gray'}`}>
                     {STATUS_LABEL[p.status] ?? p.status}
@@ -274,11 +297,11 @@ export default function ComandaPage() {
                 <div className="px-4 py-3 space-y-1.5">
                   {(p.pedido_itens ?? []).map((item: PedidoItem) => (
                     <div key={item.id} className="flex items-center justify-between text-sm">
-                      <span className="text-[#ccc]">
-                        <span className="text-gold font-semibold mr-1.5">{item.quantidade}×</span>
+                      <span style={{ color: 'var(--text-primary)' }}>
+                        <span className="font-semibold mr-1.5" style={{ color: 'var(--gold)' }}>{item.quantidade}×</span>
                         {item.nome_produto}
                       </span>
-                      <span className="text-[#555] text-xs">{fmt(Number(item.total_item))}</span>
+                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{fmt(Number(item.total_item))}</span>
                     </div>
                   ))}
                 </div>
@@ -288,22 +311,17 @@ export default function ComandaPage() {
         </div>
       </div>
 
-      {/* ── Modals ── */}
-
-      {/* Payment */}
+      {/* Payment modal */}
       <Modal open={payModal} onClose={() => setPayModal(false)} title="Registrar Pagamento">
         <div className="space-y-4">
           <div>
             <label className="label">Valor</label>
-            <input
-              type="text" inputMode="decimal" className="input text-xl font-display" placeholder="0,00"
-              value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))}
-            />
+            <input type="text" inputMode="decimal" className="input text-xl font-mono" placeholder="0,00"
+              value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} />
             {balance > 0.01 && (
-              <button
-                onClick={() => setPayForm(f => ({ ...f, amount: balance.toFixed(2).replace('.', ',') }))}
-                className="flex items-center gap-1 text-xs text-gold mt-2 hover:text-gold-light"
-              >
+              <button onClick={() => setPayForm(f => ({ ...f, amount: balance.toFixed(2).replace('.', ',') }))}
+                className="flex items-center gap-1 text-xs mt-2 hover:opacity-80"
+                style={{ color: 'var(--gold)' }}>
                 <ChevronRight size={12} /> Usar saldo total: {fmt(balance)}
               </button>
             )}
@@ -312,66 +330,52 @@ export default function ComandaPage() {
             <label className="label">Forma de Pagamento</label>
             <div className="grid grid-cols-2 gap-2">
               {(Object.keys(METHOD_LABEL) as PayMethod[]).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setPayForm(f => ({ ...f, method: m }))}
-                  className={[
-                    'flex items-center gap-2.5 p-3 rounded-xl border text-sm font-medium transition active:scale-95',
-                    payForm.method === m
-                      ? 'border-gold/40 bg-gold/10 text-gold'
-                      : 'border-ink-border bg-ink-raised text-[#666] hover:text-white hover:border-ink-border-2',
-                  ].join(' ')}
-                >
+                <button key={m} onClick={() => setPayForm(f => ({ ...f, method: m }))}
+                  className="flex items-center gap-2.5 p-3 rounded-xl text-sm font-medium transition active:scale-95"
+                  style={{
+                    border: `1px solid ${payForm.method === m ? 'var(--gold-border)' : 'var(--border-default)'}`,
+                    background: payForm.method === m ? 'var(--gold-bg)' : 'var(--bg-raised)',
+                    color: payForm.method === m ? 'var(--gold)' : 'var(--text-secondary)',
+                  }}>
                   {METHOD_ICON[m]} {METHOD_LABEL[m]}
                 </button>
               ))}
             </div>
           </div>
-          <button
-            onClick={addPayment}
-            disabled={!payForm.amount || saving}
-            className="btn-primary w-full py-3.5"
-          >
+          <button onClick={addPayment} disabled={!payForm.amount || saving} className="btn-primary w-full py-3.5">
             {saving ? <Spinner size={18} /> : 'Confirmar Pagamento'}
           </button>
         </div>
       </Modal>
 
-      {/* Transfer */}
+      {/* Transfer modal */}
       <Modal open={transferModal} onClose={() => setTransferModal(false)} title="Transferir Mesa">
         <div className="space-y-4">
-          <p className="text-sm text-[#555]">Selecione a mesa de destino</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Selecione a mesa de destino</p>
           {mesasDisp.length === 0 ? (
-            <p className="text-center py-6 text-[#444] text-sm">Nenhuma mesa disponível</p>
+            <p className="text-center py-6 text-sm" style={{ color: 'var(--text-muted)' }}>Nenhuma mesa disponível</p>
           ) : (
             <div className="grid grid-cols-4 gap-2">
               {mesasDisp.map(m => (
-                <button
-                  key={m.id}
-                  onClick={() => setTransferMesa(String(m.id))}
-                  className={[
-                    'p-3 rounded-xl border font-display font-bold text-xl transition active:scale-95',
-                    transferMesa === String(m.id)
-                      ? 'border-gold bg-gold/10 text-gold'
-                      : 'border-ink-border bg-ink-raised text-white hover:border-ink-border-2',
-                  ].join(' ')}
-                >
+                <button key={m.id} onClick={() => setTransferMesa(String(m.id))}
+                  className="p-3 rounded-xl font-mono font-bold text-xl transition active:scale-95"
+                  style={{
+                    border: `1px solid ${transferMesa === String(m.id) ? 'var(--gold)' : 'var(--border-default)'}`,
+                    background: transferMesa === String(m.id) ? 'var(--gold-bg)' : 'var(--bg-raised)',
+                    color: transferMesa === String(m.id) ? 'var(--gold)' : 'var(--text-primary)',
+                  }}>
                   {m.numero}
                 </button>
               ))}
             </div>
           )}
-          <button
-            onClick={transferMesaFn}
-            disabled={!transferMesa || saving}
-            className="btn-primary w-full py-3.5"
-          >
+          <button onClick={transferMesaFn} disabled={!transferMesa || saving} className="btn-primary w-full py-3.5">
             {saving ? <Spinner size={18} /> : 'Transferir Mesa'}
           </button>
         </div>
       </Modal>
 
-      {/* Add Order */}
+      {/* Add Order modal */}
       <Modal open={addOrderModal} onClose={() => setAddOrderModal(false)} title="Novo Pedido" size="lg">
         <AddOrderForm
           comandaId={comanda.id}
@@ -384,10 +388,12 @@ export default function ComandaPage() {
 }
 
 function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId: number; onDone: () => void }) {
+  const { profile } = useAuth()
   const [categories, setCategories] = useState<Categoria[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [selCat, setSelCat] = useState<number | null>(null)
   const [cart, setCart] = useState<{ id: number; nome: string; preco: number; qty: number; is_rosh: boolean }[]>([])
+  const [observacao, setObservacao] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -419,7 +425,7 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
     setSaving(true)
     const { data: pedido } = await supabase
       .from('pedidos')
-      .insert({ comanda_id: comandaId, mesa_id: mesaId })
+      .insert({ comanda_id: comandaId, mesa_id: mesaId, observacao: observacao || null, criado_por: profile?.id })
       .select()
       .single()
     await supabase.from('pedido_itens').insert(
@@ -447,19 +453,21 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
       {/* Category tabs */}
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
         {categories.map(c => (
-          <button
-            key={c.id}
-            onClick={() => setSelCat(c.id)}
-            className={[
-              'shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition',
-              selCat === c.id
-                ? 'bg-gold text-ink font-bold'
-                : 'bg-ink-raised border border-ink-border text-[#666] hover:text-white',
-            ].join(' ')}
-          >
+          <button key={c.id} onClick={() => setSelCat(c.id)}
+            className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition"
+            style={{
+              background: selCat === c.id ? 'var(--gold)' : 'var(--bg-raised)',
+              color: selCat === c.id ? 'var(--gold-fg)' : 'var(--text-secondary)',
+              border: `1px solid ${selCat === c.id ? 'transparent' : 'var(--border-default)'}`,
+            }}>
             {c.nome}
           </button>
         ))}
+        {categories.length === 0 && (
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Nenhuma categoria cadastrada. Acesse Configurações → Categorias.
+          </p>
+        )}
       </div>
 
       {/* Product grid */}
@@ -467,42 +475,65 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
         {filtered.map(p => {
           const inCart = cart.find(i => i.id === p.id)
           return (
-            <button
-              key={p.id}
-              onClick={() => add(p)}
-              className={[
-                'flex flex-col p-3 rounded-xl border text-left transition active:scale-95',
-                inCart
-                  ? 'border-gold/40 bg-gold/10'
-                  : 'border-ink-border bg-ink-raised hover:border-ink-border-2',
-              ].join(' ')}
-            >
-              <span className="text-sm font-medium text-white leading-snug">{p.nome}</span>
+            <button key={p.id} onClick={() => add(p)}
+              className="flex flex-col p-3 rounded-xl text-left transition active:scale-95"
+              style={{
+                border: `1px solid ${inCart ? 'var(--gold-border)' : 'var(--border-default)'}`,
+                background: inCart ? 'var(--gold-bg)' : 'var(--bg-raised)',
+              }}>
+              <span className="text-sm font-medium leading-snug" style={{ color: 'var(--text-primary)' }}>{p.nome}</span>
               <div className="flex items-center justify-between mt-1.5">
-                <span className="text-xs font-bold text-gold">R$ {Number(p.preco).toFixed(2).replace('.', ',')}</span>
-                {inCart && <span className="text-[10px] font-bold text-gold bg-gold/10 border border-gold/20 px-1.5 py-0.5 rounded-full">{inCart.qty}×</span>}
+                <span className="text-xs font-bold font-mono" style={{ color: 'var(--gold)' }}>
+                  R$ {Number(p.preco).toFixed(2).replace('.', ',')}
+                </span>
+                {inCart && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)' }}>
+                    {inCart.qty}×
+                  </span>
+                )}
               </div>
             </button>
           )
         })}
+        {filtered.length === 0 && categories.length > 0 && (
+          <p className="col-span-2 text-center py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+            Nenhum produto nesta categoria
+          </p>
+        )}
       </div>
 
       {/* Cart summary */}
       {cart.length > 0 && (
-        <div className="bg-ink-raised border border-ink-border rounded-xl p-3 space-y-2">
+        <div className="rounded-xl p-3 space-y-2"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
           {cart.map(i => (
             <div key={i.id} className="flex items-center gap-2 text-sm">
-              <button onClick={() => remove(i.id)} className="w-5 h-5 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center text-xs font-bold shrink-0">−</button>
-              <span className="flex-1 text-white">{i.qty}× {i.nome}</span>
-              <span className="text-[#555] text-xs">R$ {(i.preco * i.qty).toFixed(2).replace('.', ',')}</span>
+              <button onClick={() => remove(i.id)}
+                className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                style={{ background: 'var(--red-bg)', color: 'var(--red)' }}>−</button>
+              <span className="flex-1" style={{ color: 'var(--text-primary)' }}>{i.qty}× {i.nome}</span>
+              <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
+                R$ {(i.preco * i.qty).toFixed(2).replace('.', ',')}
+              </span>
             </div>
           ))}
-          <div className="flex justify-between items-center pt-2 border-t border-ink-border">
-            <span className="text-sm text-[#888]">{cartCount} item(s)</span>
-            <span className="font-bold text-gold">R$ {cartTotal.toFixed(2).replace('.', ',')}</span>
+          <div className="flex justify-between items-center pt-2"
+            style={{ borderTop: '1px solid var(--border-subtle)' }}>
+            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{cartCount} item(s)</span>
+            <span className="font-bold font-mono" style={{ color: 'var(--gold)' }}>
+              R$ {cartTotal.toFixed(2).replace('.', ',')}
+            </span>
           </div>
         </div>
       )}
+
+      {/* Observação */}
+      <div>
+        <label className="label">Observação (opcional)</label>
+        <input className="input text-sm" placeholder="Ex: sem gelo, bem passado, alergia a…"
+          value={observacao} onChange={e => setObservacao(e.target.value)} />
+      </div>
 
       <button onClick={submit} disabled={cart.length === 0 || saving} className="btn-primary w-full py-3.5">
         {saving ? <Spinner size={18} /> : `Enviar Pedido${cartTotal > 0 ? ` · R$ ${cartTotal.toFixed(2).replace('.', ',')}` : ''}`}

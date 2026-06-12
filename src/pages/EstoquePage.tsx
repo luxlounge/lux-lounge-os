@@ -148,39 +148,57 @@ export default function EstoquePage() {
         )}
 
         {tab === 'movements' && (
-          <div className="space-y-2">
+          <div className="space-y-4">
             {movements.length === 0 && (
               <div className="flex flex-col items-center py-16">
                 <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Nenhuma movimentação</p>
               </div>
             )}
-            {movements.map(m => {
-              const cfg = tipoConfig[m.tipo as keyof typeof tipoConfig]
-              const Icon = cfg.icon
-              const sign = m.tipo === 'entrada' ? '+' : m.tipo === 'saida' ? '−' : ''
-              return (
-                <div key={m.id} className="card flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
-                    <Icon size={14} style={{ color: cfg.color }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                      {(m as any).products?.nome ?? '—'}
-                    </p>
-                    {m.motivo && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.motivo}</p>}
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="font-mono font-bold text-sm" style={{ color: cfg.color }}>
-                      {sign}{m.quantidade}
-                    </p>
-                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      {format(new Date(m.created_at), 'dd/MM HH:mm')}
-                    </p>
+            {(() => {
+              // Group by date
+              const groups: Record<string, EstoqueMovimento[]> = {}
+              for (const m of movements) {
+                const day = format(new Date(m.created_at), 'yyyy-MM-dd')
+                if (!groups[day]) groups[day] = []
+                groups[day].push(m)
+              }
+              return Object.entries(groups).map(([day, items]) => (
+                <div key={day}>
+                  <p className="text-[10px] uppercase tracking-wider mb-2 px-1" style={{ color: 'var(--text-muted)' }}>
+                    {format(new Date(day + 'T12:00:00'), 'dd/MM/yyyy')}
+                  </p>
+                  <div className="space-y-2">
+                    {items.map(m => {
+                      const cfg = tipoConfig[m.tipo as keyof typeof tipoConfig]
+                      const Icon = cfg.icon
+                      const sign = m.tipo === 'entrada' ? '+' : m.tipo === 'saida' ? '−' : ''
+                      return (
+                        <div key={m.id} className="card flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                            style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                            <Icon size={14} style={{ color: cfg.color }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                              {(m as any).products?.nome ?? '—'}
+                            </p>
+                            {m.motivo && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.motivo}</p>}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="font-mono font-bold text-sm" style={{ color: cfg.color }}>
+                              {sign}{m.quantidade}
+                            </p>
+                            <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                              {format(new Date(m.created_at), 'HH:mm')}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
-              )
-            })}
+              ))
+            })()}
           </div>
         )}
       </div>
