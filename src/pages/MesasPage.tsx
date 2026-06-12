@@ -112,17 +112,29 @@ export default function MesasPage() {
   async function confirmOpen() {
     if (!checkinMesa) return
     setOpening(true)
-    const { data: comanda } = await supabase
+    const { data: comanda, error: comandaErr } = await supabase
       .from('comandas')
       .insert({ mesa_id: checkinMesa.id, status: 'aberta', aberta_por: profile?.id })
       .select()
       .single()
-    await supabase.from('mesas').update({ status: 'ocupada' }).eq('id', checkinMesa.id)
+    if (comandaErr || !comanda?.id) {
+      setOpening(false)
+      toastError(comandaErr?.message ?? 'Erro ao criar comanda. Tente novamente.')
+      return
+    }
+    const { error: mesaErr } = await supabase
+      .from('mesas').update({ status: 'ocupada' }).eq('id', checkinMesa.id)
+    if (mesaErr) {
+      setOpening(false)
+      toastError('Comanda criada, mas falha ao atualizar status da mesa.')
+      navigate(`/comanda/${comanda.id}`)
+      return
+    }
     setOpening(false)
     setCheckinOpen(false)
     setSelected(null)
     toast(`Mesa ${checkinMesa.numero} aberta`)
-    navigate(`/comanda/${comanda?.id}`)
+    navigate(`/comanda/${comanda.id}`)
   }
 
   async function changeStatus(status: Mesa['status']) {

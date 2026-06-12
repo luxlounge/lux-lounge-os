@@ -86,6 +86,11 @@ export default function ComandaPage() {
     await supabase.from('pagamentos').insert({
       comanda_id: comanda.id, valor, metodo: payForm.method, registrado_por: profile?.id,
     })
+    // Update total_pago without depending on a trigger
+    const { data: pags } = await supabase
+      .from('pagamentos').select('valor').eq('comanda_id', comanda.id)
+    const totalPago = (pags ?? []).reduce((s, p) => s + Number(p.valor), 0)
+    await supabase.from('comandas').update({ total_pago: totalPago }).eq('id', comanda.id)
     setSaving(false)
     setPayModal(false)
     setPayForm({ amount: '', method: 'pix' })
@@ -423,21 +428,34 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
   async function submit() {
     if (cart.length === 0) return
     setSaving(true)
-    const { data: pedido } = await supabase
+    const { data: pedido, error: pedidoErr } = await supabase
       .from('pedidos')
       .insert({ comanda_id: comandaId, mesa_id: mesaId, observacao: observacao || null, criado_por: profile?.id })
       .select()
       .single()
-    await supabase.from('pedido_itens').insert(
-      cart.map(i => ({
-        pedido_id: pedido!.id,
-        product_id: i.id,
-        nome_produto: i.nome,
-        preco_unitario: i.preco,
-        quantidade: i.qty,
-        is_rosh: i.is_rosh,
-      }))
-    )
+    if (pedidoErr || !pedido) { setSaving(false); return }
+
+    const itens = cart.map(i => ({
+      pedido_id: pedido.id,
+      product_id: i.id,
+      nome_produto: i.nome,
+      preco_unitario: i.preco,
+      quantidade: i.qty,
+      is_rosh: i.is_rosh,
+      total_item: i.preco * i.qty,
+    }))
+    await supabase.from('pedido_itens').insert(itens)
+
+    // Update comanda total without depending on a trigger
+    const pedidoTotal = itens.reduce((s, i) => s + i.total_item, 0)
+    const { data: currentComanda } = await supabase
+      .from('comandas').select('total').eq('id', comandaId).single()
+    if (currentComanda) {
+      await supabase.from('comandas')
+        .update({ total: (currentComanda.total ?? 0) + pedidoTotal })
+        .eq('id', comandaId)
+    }
+
     setSaving(false)
     onDone()
   }

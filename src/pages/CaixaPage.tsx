@@ -103,6 +103,11 @@ export default function CaixaPage() {
     await supabase.from('pagamentos').insert({
       comanda_id: comanda.id, valor, metodo: form.method, registrado_por: profile?.id,
     })
+    // Update total_pago without depending on a trigger
+    const { data: pags } = await supabase
+      .from('pagamentos').select('valor').eq('comanda_id', comanda.id)
+    const totalPago = (pags ?? []).reduce((s, p) => s + Number(p.valor), 0)
+    await supabase.from('comandas').update({ total_pago: totalPago }).eq('id', comanda.id)
     setPayForms(prev => ({ ...prev, [comanda.id]: { amount: '', method: 'pix' } }))
     setPayingId(null)
     toast(`${fmt(valor)} registrado via ${METHOD_LABEL[form.method]}`)
