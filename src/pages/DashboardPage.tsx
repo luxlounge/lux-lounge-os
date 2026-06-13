@@ -30,6 +30,10 @@ interface Stats {
   catCount: number
   prodCount: number
   mesaCount: number
+  lucroHoje: number
+  margemMedia: number
+  topProfitProduct: string
+  topProfitCategory: string
 }
 
 export default function DashboardPage() {
@@ -55,7 +59,7 @@ export default function DashboardPage() {
       supabase.from('pagamentos').select('valor').gte('created_at', today.toISOString()),
       supabase.from('mesas').select('status'),
       supabase.from('pedidos').select('id, status, created_at, comandas(mesa_id, mesas(numero))').in('status', ['pendente', 'preparo']),
-      supabase.from('pedido_itens').select('nome_produto, quantidade, is_rosh, pedidos(created_at)'),
+      supabase.from('pedido_itens').select('nome_produto, quantidade, is_rosh, preco_unitario, total_item, pedidos(created_at), products(cost_price, avg_cost, categoria_id, categorias(nome))'),
       supabase.from('products').select('nome, stock_quantity').lt('stock_quantity', 5).eq('active', true).order('stock_quantity'),
       supabase.from('comandas').select('id, total, total_pago, aberta_em, mesas(numero)').eq('status', 'aberta'),
       supabase.from('comandas').select('total').eq('status', 'fechada').gte('fechada_em', today.toISOString()),
@@ -103,11 +107,37 @@ export default function DashboardPage() {
       ? (closedComandas ?? []).reduce((s, c) => s + Number(c.total), 0) / (closedComandas ?? []).length
       : 0
 
+    // Financial intelligence
+    let lucroHoje = 0
+    const profitByProduct: Record<string, number> = {}
+    const profitByCategory: Record<string, number> = {}
+    const marginSamples: number[] = []
+
+    for (const i of todayItems) {
+      const item = i as any
+      const costPrice = (item.products?.avg_cost ?? 0) > 0 ? (item.products?.avg_cost ?? 0) : (item.products?.cost_price ?? 0)
+      const preco = item.preco_unitario ?? 0
+      const qty = item.quantidade ?? 0
+      const profit = (preco - costPrice) * qty
+      lucroHoje += profit
+      if (preco > 0) marginSamples.push(((preco - costPrice) / preco) * 100)
+      profitByProduct[item.nome_produto] = (profitByProduct[item.nome_produto] ?? 0) + profit
+      const catNome = item.products?.categorias?.nome ?? 'Sem categoria'
+      profitByCategory[catNome] = (profitByCategory[catNome] ?? 0) + profit
+    }
+
+    const margemMedia = marginSamples.length > 0
+      ? marginSamples.reduce((s, m) => s + m, 0) / marginSamples.length
+      : 0
+    const topProfitProduct = Object.entries(profitByProduct).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+    const topProfitCategory = Object.entries(profitByCategory).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+
     setStats({
       revenue, totalToReceive, occupiedTables, totalMesas: allMesas?.length ?? 0,
       roshSold, ordersToday, pendingOrders, preparingOrders, avgTicket,
       lowStock: lowStock ?? [], topProducts, urgentPedidos, longOpenMesas,
       catCount: catCount ?? 0, prodCount: prodCount ?? 0, mesaCount: allMesas?.length ?? 0,
+      lucroHoje, margemMedia, topProfitProduct, topProfitCategory,
     })
     setLoading(false)
   }, [])
@@ -328,6 +358,22 @@ export default function DashboardPage() {
             )}
           </div>
         )}
+
+        {/* Financial intelligence */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {[
+            { label: 'Lucro Hoje',      value: fmt(stats!.lucroHoje),           color: stats!.lucroHoje >= 0 ? 'var(--green)' : 'var(--red)' },
+            { label: 'Margem Média',    value: `${stats!.margemMedia.toFixed(0)}%`, color: stats!.margemMedia >= 30 ? 'var(--green)' : stats!.margemMedia >= 10 ? 'var(--amber)' : 'var(--red)' },
+            { label: 'Mais Lucrativo',  value: stats!.topProfitProduct,         color: 'var(--gold)' },
+            { label: 'Cat. Lucrativa',  value: stats!.topProfitCategory,        color: 'var(--text-primary)' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="rounded-xl p-3"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+              <p className="text-[9px] uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>{label}</p>
+              <p className="font-mono font-bold text-sm truncate" style={{ color }}>{value}</p>
+            </div>
+          ))}
+        </div>
 
         {/* Top products */}
         {stats!.topProducts.length > 0 && (

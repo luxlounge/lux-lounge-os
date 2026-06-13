@@ -41,8 +41,22 @@ export interface Product {
   is_insumo_rosh: boolean
   carvao_por_rosh: number
   imagem_url: string | null
+  cost_price: number
+  unit_type: string
+  package_quantity: number
+  avg_cost: number
+  last_purchase_at: string | null
   created_at: string
   categorias?: Categoria
+}
+
+export interface RecipeItem {
+  id: number
+  product_id: number
+  ingredient_product_id: number
+  quantity_used: number
+  created_at: string
+  ingredient?: Product
 }
 
 export interface Comanda {
@@ -88,6 +102,18 @@ export interface Pagamento {
   valor: number
   registrado_por: string | null
   observacao: string | null
+  created_at: string
+}
+
+export interface StockPurchase {
+  id: number
+  product_id: number
+  quantity: number
+  unit_cost: number
+  total_cost: number
+  supplier: string | null
+  purchased_at: string
+  created_by: string | null
   created_at: string
 }
 

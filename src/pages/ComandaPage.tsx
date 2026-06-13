@@ -456,6 +456,55 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
         .eq('id', comandaId)
     }
 
+    // Auto stock deduction based on recipe (or self-deduction)
+    const productIds = cart.map(i => i.id)
+    const { data: recipes } = await supabase
+      .from('product_recipe_items')
+      .select('product_id, ingredient_product_id, quantity_used')
+      .in('product_id', productIds)
+
+    for (const cartItem of cart) {
+      const itemRecipes = (recipes ?? []).filter(r => r.product_id === cartItem.id)
+      if (itemRecipes.length > 0) {
+        // Deduct ingredients
+        for (const r of itemRecipes) {
+          const totalUsed = r.quantity_used * cartItem.qty
+          const { data: ing } = await supabase
+            .from('products').select('stock_quantity').eq('id', r.ingredient_product_id).single()
+          if (ing) {
+            await supabase.from('products')
+              .update({ stock_quantity: Math.max(0, ing.stock_quantity - totalUsed) })
+              .eq('id', r.ingredient_product_id)
+            await supabase.from('estoque_movimentos').insert({
+              product_id: r.ingredient_product_id,
+              tipo: 'saida',
+              quantidade: totalUsed,
+              motivo: `Venda pedido #${pedido.id}`,
+              pedido_id: pedido.id,
+              criado_por: profile?.id ?? null,
+            })
+          }
+        }
+      } else {
+        // No recipe: deduct product itself
+        const { data: prod } = await supabase
+          .from('products').select('stock_quantity').eq('id', cartItem.id).single()
+        if (prod) {
+          await supabase.from('products')
+            .update({ stock_quantity: Math.max(0, prod.stock_quantity - cartItem.qty) })
+            .eq('id', cartItem.id)
+          await supabase.from('estoque_movimentos').insert({
+            product_id: cartItem.id,
+            tipo: 'saida',
+            quantidade: cartItem.qty,
+            motivo: `Venda pedido #${pedido.id}`,
+            pedido_id: pedido.id,
+            criado_por: profile?.id ?? null,
+          })
+        }
+      }
+    }
+
     setSaving(false)
     onDone()
   }

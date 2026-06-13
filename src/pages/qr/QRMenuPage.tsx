@@ -71,8 +71,19 @@ export default function QRMenuPage() {
       preco_unitario: i.preco,
       quantidade: i.qty,
       is_rosh: i.is_rosh,
+      total_item: i.preco * i.qty,
     }))
     await supabase.from('pedido_itens').insert(items)
+
+    // Update comanda total
+    const pedidoTotal = items.reduce((s, i) => s + i.total_item, 0)
+    const { data: currentComanda } = await supabase
+      .from('comandas').select('total').eq('id', comanda.id).single()
+    if (currentComanda) {
+      await supabase.from('comandas')
+        .update({ total: (currentComanda.total ?? 0) + pedidoTotal })
+        .eq('id', comanda.id)
+    }
 
     setCart([])
     setSending(false)
