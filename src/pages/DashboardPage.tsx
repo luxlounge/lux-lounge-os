@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import {
   TrendingUp, LayoutGrid, Wind, ClipboardList, AlertTriangle, Star,
-  Clock, DollarSign, CheckCircle, ChevronRight, Flame,
+  Clock, DollarSign, CheckCircle, ChevronRight, Flame, Users,
 } from 'lucide-react'
 import { SkeletonCard } from '../components/ui/Skeleton'
 import { format } from 'date-fns'
@@ -34,6 +34,11 @@ interface Stats {
   margemMedia: number
   topProfitProduct: string
   topProfitCategory: string
+  crmTotal: number
+  crmVip: number
+  crmFrequente: number
+  crmNovo: number
+  crmInativo: number
 }
 
 export default function DashboardPage() {
@@ -55,6 +60,8 @@ export default function DashboardPage() {
       { data: closedComandas },
       { count: catCount },
       { count: prodCount },
+      { data: clientes },
+      { data: crmCfg },
     ] = await Promise.all([
       supabase.from('pagamentos').select('valor').gte('created_at', today.toISOString()),
       supabase.from('mesas').select('status'),
@@ -65,6 +72,8 @@ export default function DashboardPage() {
       supabase.from('comandas').select('total').eq('status', 'fechada').gte('fechada_em', today.toISOString()),
       supabase.from('categorias').select('id', { count: 'exact', head: true }),
       supabase.from('products').select('id', { count: 'exact', head: true }).eq('active', true),
+      supabase.from('clientes').select('id, created_at, last_visit, total_visits, total_spent, is_vip_manual'),
+      supabase.from('crm_config').select('*').eq('id', 1).single(),
     ])
 
     const revenue = (payments ?? []).reduce((s, p) => s + Number(p.valor), 0)
@@ -132,12 +141,30 @@ export default function DashboardPage() {
     const topProfitProduct = Object.entries(profitByProduct).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
     const topProfitCategory = Object.entries(profitByCategory).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
 
+    // CRM counts
+    const vipSpent = crmCfg?.vip_min_spent ?? 1500
+    const vipVisits = crmCfg?.vip_min_visits ?? 10
+    const freqVisits = crmCfg?.frequent_min_visits ?? 5
+    const inactiveDays = crmCfg?.inactive_days ?? 60
+    let crmVip = 0, crmFrequente = 0, crmNovo = 0, crmInativo = 0
+    for (const c of clientes ?? []) {
+      const daysSince = (iso: string | null) => iso ? (now - new Date(iso).getTime()) / 86400000 : Infinity
+      const isVip = c.is_vip_manual || Number(c.total_spent) >= vipSpent || c.total_visits >= vipVisits
+      const isNew = daysSince(c.created_at) < 30
+      const isInactive = daysSince(c.last_visit) >= inactiveDays
+      if (isVip) crmVip++
+      else if (c.total_visits >= freqVisits) crmFrequente++
+      if (isNew) crmNovo++
+      if (isInactive && !isNew) crmInativo++
+    }
+
     setStats({
       revenue, totalToReceive, occupiedTables, totalMesas: allMesas?.length ?? 0,
       roshSold, ordersToday, pendingOrders, preparingOrders, avgTicket,
       lowStock: lowStock ?? [], topProducts, urgentPedidos, longOpenMesas,
       catCount: catCount ?? 0, prodCount: prodCount ?? 0, mesaCount: allMesas?.length ?? 0,
       lucroHoje, margemMedia, topProfitProduct, topProfitCategory,
+      crmTotal: clientes?.length ?? 0, crmVip, crmFrequente, crmNovo, crmInativo,
     })
     setLoading(false)
   }, [])
@@ -374,6 +401,37 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        {/* CRM summary */}
+        {stats!.crmTotal > 0 && (
+          <button className="w-full text-left card" onClick={() => navigate('/clientes')}>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                style={{ background: 'var(--blue-bg)', border: '1px solid var(--blue-border)' }}>
+                <Users size={13} style={{ color: 'var(--blue)' }} />
+              </div>
+              <span className="section-header">Clientes</span>
+              <span className="ml-auto text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}>
+                {stats!.crmTotal} cadastrados
+              </span>
+              <ChevronRight size={13} style={{ color: 'var(--text-muted)' }} />
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: 'VIP',       value: stats!.crmVip,       color: 'var(--gold)' },
+                { label: 'Frequente', value: stats!.crmFrequente, color: 'var(--green)' },
+                { label: 'Novos',     value: stats!.crmNovo,      color: 'var(--blue)' },
+                { label: 'Inativos',  value: stats!.crmInativo,   color: 'var(--text-muted)' },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="rounded-xl p-2.5 text-center"
+                  style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-subtle)' }}>
+                  <p className="font-mono font-bold text-lg leading-none" style={{ color }}>{value}</p>
+                  <p className="text-[9px] mt-1 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</p>
+                </div>
+              ))}
+            </div>
+          </button>
+        )}
 
         {/* Top products */}
         {stats!.topProducts.length > 0 && (

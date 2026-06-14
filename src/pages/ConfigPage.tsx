@@ -3,9 +3,9 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { Modal } from '../components/ui/Modal'
 import { Spinner } from '../components/ui/Spinner'
-import { Plus, Users, LayoutGrid, Lock, Tag, Edit2, Trash2 } from 'lucide-react'
+import { Plus, Users, LayoutGrid, Lock, Tag, Edit2, Trash2, Heart } from 'lucide-react'
 import { useToast } from '../components/ui/Toast'
-import type { Profile, Mesa, Categoria } from '../types'
+import type { Profile, Mesa, Categoria, CrmConfig } from '../types'
 import type { UserRole } from '../types'
 
 const ROLE_LABELS: Record<UserRole, string> = { admin: 'Admin', caixa: 'Caixa', operador: 'Operador' }
@@ -34,7 +34,10 @@ export default function ConfigPage() {
   const [categories, setCategories] = useState<Categoria[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState<'users' | 'tables' | 'cats'>('users')
+  const [tab, setTab] = useState<'users' | 'tables' | 'cats' | 'crm'>('users')
+  const [crmConfig, setCrmConfig] = useState<CrmConfig | null>(null)
+  const [crmForm, setCrmForm] = useState({ vip_min_spent: '1500', vip_min_visits: '10', frequent_min_visits: '5', inactive_days: '60' })
+  const [savingCrm, setSavingCrm] = useState(false)
 
   // User modals
   const [userModal, setUserModal] = useState(false)
@@ -57,15 +60,40 @@ export default function ConfigPage() {
   const [catForm, setCatForm] = useState({ nome: '', ordem: '0', exibe_cardapio: true, controla_estoque: false })
 
   async function load() {
-    const [{ data: ps }, { data: ms }, { data: cs }] = await Promise.all([
+    const [{ data: ps }, { data: ms }, { data: cs }, { data: crm }] = await Promise.all([
       supabase.from('profiles').select('*').order('nome'),
       supabase.from('mesas').select('*').order('numero'),
       supabase.from('categorias').select('*').order('ordem'),
+      supabase.from('crm_config').select('*').eq('id', 1).single(),
     ])
     setProfiles(ps ?? [])
     setMesas(ms ?? [])
     setCategories(cs ?? [])
+    if (crm) {
+      setCrmConfig(crm)
+      setCrmForm({
+        vip_min_spent: String(crm.vip_min_spent),
+        vip_min_visits: String(crm.vip_min_visits),
+        frequent_min_visits: String(crm.frequent_min_visits),
+        inactive_days: String(crm.inactive_days),
+      })
+    }
     setLoading(false)
+  }
+
+  async function saveCrmConfig() {
+    setSavingCrm(true)
+    await supabase.from('crm_config').upsert({
+      id: 1,
+      vip_min_spent: parseFloat(crmForm.vip_min_spent) || 1500,
+      vip_min_visits: parseInt(crmForm.vip_min_visits) || 10,
+      frequent_min_visits: parseInt(crmForm.frequent_min_visits) || 5,
+      inactive_days: parseInt(crmForm.inactive_days) || 60,
+      updated_at: new Date().toISOString(),
+    })
+    setSavingCrm(false)
+    toast('Configurações CRM salvas')
+    load()
   }
 
   useEffect(() => { load() }, [])
@@ -212,6 +240,7 @@ export default function ConfigPage() {
     { key: 'users',  icon: Users,      label: 'Usuários' },
     { key: 'tables', icon: LayoutGrid,  label: 'Mesas' },
     { key: 'cats',   icon: Tag,         label: 'Categorias' },
+    { key: 'crm',    icon: Heart,       label: 'CRM' },
   ] as const
 
   return (
@@ -224,7 +253,7 @@ export default function ConfigPage() {
           <div>
             <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Configurações</h1>
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              {tab === 'users' ? `${profiles.length} usuários` : tab === 'tables' ? `${mesas.length} mesas` : `${categories.length} categorias`}
+              {tab === 'users' ? `${profiles.length} usuários` : tab === 'tables' ? `${mesas.length} mesas` : tab === 'cats' ? `${categories.length} categorias` : 'Regras de segmentação CRM'}
             </p>
           </div>
           {tab === 'users' && (
@@ -363,6 +392,59 @@ export default function ConfigPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {/* CRM Config */}
+        {tab === 'crm' && (
+          <div className="space-y-4 max-w-lg">
+            <div className="card space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Tag VIP</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Gasto mínimo (R$)</label>
+                  <input type="number" className="input" value={crmForm.vip_min_spent}
+                    onChange={e => setCrmForm(f => ({ ...f, vip_min_spent: e.target.value }))} />
+                  <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Total gasto ≥ R$ {crmForm.vip_min_spent}</p>
+                </div>
+                <div>
+                  <label className="label">Visitas mínimas</label>
+                  <input type="number" className="input" value={crmForm.vip_min_visits}
+                    onChange={e => setCrmForm(f => ({ ...f, vip_min_visits: e.target.value }))} />
+                  <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Visitas ≥ {crmForm.vip_min_visits} (ou gasto VIP)</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="card space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Tag Frequente</p>
+              <div>
+                <label className="label">Visitas mínimas para Frequente</label>
+                <input type="number" className="input" value={crmForm.frequent_min_visits}
+                  onChange={e => setCrmForm(f => ({ ...f, frequent_min_visits: e.target.value }))} />
+                <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Visitas ≥ {crmForm.frequent_min_visits} (sem ser VIP)</p>
+              </div>
+            </div>
+
+            <div className="card space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Tag Inativo</p>
+              <div>
+                <label className="label">Dias sem visita</label>
+                <input type="number" className="input" value={crmForm.inactive_days}
+                  onChange={e => setCrmForm(f => ({ ...f, inactive_days: e.target.value }))} />
+                <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Sem visita há ≥ {crmForm.inactive_days} dias</p>
+              </div>
+            </div>
+
+            <button onClick={saveCrmConfig} disabled={savingCrm}
+              className="btn-primary w-full" style={{ padding: '14px', justifyContent: 'center' }}>
+              {savingCrm ? <Spinner size={18} /> : 'Salvar Configurações CRM'}
+            </button>
+
+            {crmConfig && (
+              <p className="text-center text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                Última atualização: {new Date(crmConfig.updated_at).toLocaleString('pt-BR')}
+              </p>
+            )}
           </div>
         )}
       </div>

@@ -67,6 +67,17 @@ export interface Cliente {
   last_visit: string | null
   total_visits: number
   total_spent: number
+  notes: string | null
+  is_vip_manual: boolean
+}
+
+export interface CrmConfig {
+  id: number
+  vip_min_spent: number
+  vip_min_visits: number
+  frequent_min_visits: number
+  inactive_days: number
+  updated_at: string
 }
 
 export interface Comanda {

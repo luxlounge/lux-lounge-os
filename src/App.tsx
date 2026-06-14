@@ -15,6 +15,7 @@ const ComandaPage  = lazy(() => import('./pages/ComandaPage'))
 const PedidosPage  = lazy(() => import('./pages/PedidosPage'))
 const ProdutosPage = lazy(() => import('./pages/ProdutosPage'))
 const EstoquePage  = lazy(() => import('./pages/EstoquePage'))
+const ClientesPage = lazy(() => import('./pages/ClientesPage'))
 const ConfigPage   = lazy(() => import('./pages/ConfigPage'))
 const CaixaPage    = lazy(() => import('./pages/CaixaPage'))
 const QRMenuPage   = lazy(() => import('./pages/qr/QRMenuPage'))
@@ -59,6 +60,7 @@ export default function App() {
                       <Route path="/pedidos"  element={<PedidosPage />} />
                       <Route path="/produtos" element={<ProdutosPage />} />
                       <Route path="/estoque"  element={<EstoquePage />} />
+                      <Route path="/clientes" element={<ClientesPage />} />
                       <Route path="/caixa"    element={<CaixaPage />} />
                       <Route path="/config"   element={<ConfigPage />} />
                     </Routes>
