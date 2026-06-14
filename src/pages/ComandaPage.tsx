@@ -7,7 +7,7 @@ import { Spinner } from '../components/ui/Spinner'
 import { useAuth } from '../hooks/useAuth'
 import {
   ArrowLeft, Plus, CreditCard, Banknote, Smartphone, DollarSign,
-  ArrowRightLeft, CheckCircle, Package, X, ChevronRight, Gift,
+  ArrowRightLeft, CheckCircle, Package, X, ChevronRight, Gift, UserCheck,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -56,7 +56,7 @@ export default function ComandaPage() {
 
   const load = useCallback(async () => {
     const [{ data: c }, { data: ps }, { data: pays }, { data: ms }] = await Promise.all([
-      supabase.from('comandas').select('*, mesas(*)').eq('id', id!).single(),
+      supabase.from('comandas').select('*, mesas(*), clientes(id, nome, whatsapp, total_visits)').eq('id', id!).single(),
       supabase.from('pedidos').select('*, pedido_itens(*)').eq('comanda_id', id!).order('created_at', { ascending: false }),
       supabase.from('pagamentos').select('*').eq('comanda_id', id!).order('created_at'),
       supabase.from('mesas').select('*').eq('status', 'disponivel').order('numero'),
@@ -162,7 +162,23 @@ export default function ComandaPage() {
             </div>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {format(new Date(comanda.aberta_em), "dd/MM 'às' HH:mm", { locale: ptBR })}
+              {comanda.pessoas ? ` · ${comanda.pessoas} pessoa(s)` : ''}
             </p>
+            {(comanda as any).clientes && (
+              <p className="text-xs flex items-center gap-1 mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                <UserCheck size={10} style={{ color: 'var(--green)' }} />
+                {(comanda as any).clientes.nome}
+                <span style={{ color: 'var(--border-strong)' }}>·</span>
+                {(comanda as any).clientes.whatsapp}
+                <span style={{ color: 'var(--border-strong)' }}>·</span>
+                {(comanda as any).clientes.total_visits}ª visita
+              </p>
+            )}
+            {comanda.observacao && (
+              <p className="text-xs italic mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                {comanda.observacao}
+              </p>
+            )}
           </div>
           {isClosed
             ? <span className="badge badge-gray text-[10px]">Fechada</span>

@@ -59,6 +59,16 @@ export interface RecipeItem {
   ingredient?: Product
 }
 
+export interface Cliente {
+  id: number
+  nome: string
+  whatsapp: string
+  created_at: string
+  last_visit: string | null
+  total_visits: number
+  total_spent: number
+}
+
 export interface Comanda {
   id: number
   mesa_id: number
@@ -69,8 +79,12 @@ export interface Comanda {
   total_pago: number
   aberta_em: string
   fechada_em: string | null
+  cliente_id: number | null
+  pessoas: number | null
+  observacao: string | null
   created_at: string
   mesas?: Mesa
+  clientes?: Cliente
 }
 
 export interface Pedido {

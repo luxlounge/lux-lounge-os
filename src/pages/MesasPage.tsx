@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import type { Mesa, Comanda, Pedido, Pagamento } from '../types'
+import type { Mesa, Comanda, Pedido, Pagamento, Cliente } from '../types'
 import { Spinner } from '../components/ui/Spinner'
 import { SkeletonMesa } from '../components/ui/Skeleton'
 import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../components/ui/Toast'
-import { X, ChevronRight, Users, CheckCircle, Wrench, Unlock, CreditCard, DollarSign, Smartphone, Gift } from 'lucide-react'
+import { X, ChevronRight, Users, CheckCircle, Wrench, Unlock, CreditCard, DollarSign, Smartphone, Gift, Phone, UserCheck, UserPlus } from 'lucide-react'
 import { format } from 'date-fns'
 
 function timeAgo(iso: string) {
@@ -57,15 +57,17 @@ export default function MesasPage() {
   const [quickPayMethod, setQuickPayMethod] = useState<string>('pix')
   const [savingPay, setSavingPay] = useState(false)
 
-  // Check-in modal (visual only — DB only stores aberta_por)
+  // Check-in modal
   const [checkinOpen, setCheckinOpen] = useState(false)
   const [checkinMesa, setCheckinMesa] = useState<MesaComComanda | null>(null)
-  const [checkinForm, setCheckinForm] = useState({ pessoas: '2', nome: '', obs: '' })
+  const [checkinForm, setCheckinForm] = useState({ nome: '', whatsapp: '', pessoas: '2', obs: '' })
+  const [clienteLookup, setClienteLookup] = useState<{ found: boolean; cliente?: Cliente } | null>(null)
+  const [lookingUp, setLookingUp] = useState(false)
 
   const load = useCallback(async () => {
     const [{ data: ms }, { data: cs }] = await Promise.all([
       supabase.from('mesas').select('*').order('numero'),
-      supabase.from('comandas').select('*').eq('status', 'aberta'),
+      supabase.from('comandas').select('*, clientes(id, nome, whatsapp)').eq('status', 'aberta'),
     ])
     const comandaMap: Record<number, Comanda> = {}
     for (const c of cs ?? []) comandaMap[c.mesa_id] = c
@@ -105,16 +107,72 @@ export default function MesasPage() {
 
   function initiateOpen(mesa: MesaComComanda) {
     setCheckinMesa(mesa)
-    setCheckinForm({ pessoas: '2', nome: '', obs: '' })
+    setCheckinForm({ nome: '', whatsapp: '', pessoas: '2', obs: '' })
+    setClienteLookup(null)
     setCheckinOpen(true)
+  }
+
+  async function lookupWhatsapp(raw: string) {
+    const clean = raw.replace(/\D/g, '')
+    if (clean.length < 10) { setClienteLookup(null); return }
+    setLookingUp(true)
+    const { data } = await supabase
+      .from('clientes').select('*').eq('whatsapp', clean).maybeSingle()
+    setLookingUp(false)
+    if (data) {
+      setClienteLookup({ found: true, cliente: data as Cliente })
+      setCheckinForm(f => ({ ...f, nome: data.nome }))
+    } else {
+      setClienteLookup({ found: false })
+    }
   }
 
   async function confirmOpen() {
     if (!checkinMesa) return
+    const nomeClean = checkinForm.nome.trim()
+    const wppClean = checkinForm.whatsapp.replace(/\D/g, '')
+    if (!nomeClean || !wppClean) {
+      toastError('Nome e WhatsApp são obrigatórios.')
+      return
+    }
     setOpening(true)
+
+    // — Upsert cliente —
+    let clienteId: number
+    if (clienteLookup?.found && clienteLookup.cliente) {
+      clienteId = clienteLookup.cliente.id
+      const { data: cli } = await supabase
+        .from('clientes').select('total_visits').eq('id', clienteId).single()
+      await supabase.from('clientes').update({
+        last_visit: new Date().toISOString(),
+        total_visits: (cli?.total_visits ?? 0) + 1,
+        nome: nomeClean,
+      }).eq('id', clienteId)
+    } else {
+      const { data: newCli, error: cliErr } = await supabase
+        .from('clientes')
+        .insert({ nome: nomeClean, whatsapp: wppClean, last_visit: new Date().toISOString(), total_visits: 1 })
+        .select('id')
+        .single()
+      if (cliErr || !newCli) {
+        setOpening(false)
+        toastError(cliErr?.message ?? 'Erro ao cadastrar cliente.')
+        return
+      }
+      clienteId = newCli.id
+    }
+
+    // — Criar comanda —
     const { data: comanda, error: comandaErr } = await supabase
       .from('comandas')
-      .insert({ mesa_id: checkinMesa.id, status: 'aberta', aberta_por: profile?.id })
+      .insert({
+        mesa_id: checkinMesa.id,
+        status: 'aberta',
+        aberta_por: profile?.id,
+        cliente_id: clienteId,
+        pessoas: parseInt(checkinForm.pessoas) || null,
+        observacao: checkinForm.obs.trim() || null,
+      })
       .select()
       .single()
     if (comandaErr || !comanda?.id) {
@@ -133,7 +191,7 @@ export default function MesasPage() {
     setOpening(false)
     setCheckinOpen(false)
     setSelected(null)
-    toast(`Mesa ${checkinMesa.numero} aberta`)
+    toast(`Mesa ${checkinMesa.numero} aberta — ${nomeClean}`)
     navigate(`/comanda/${comanda.id}`)
   }
 
@@ -259,6 +317,11 @@ export default function MesasPage() {
                     <div className="text-[10px] font-semibold font-mono" style={{ color: 'var(--gold)' }}>
                       {timeAgo(m.comanda.aberta_em)}
                     </div>
+                    {(m.comanda as any).clientes?.nome && (
+                      <div className="text-[9px] truncate font-medium" style={{ color: 'var(--text-secondary)' }}>
+                        {(m.comanda as any).clientes.nome.split(' ')[0]}
+                      </div>
+                    )}
                     {m.comanda.total > 0 && (
                       <div className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>
                         {fmt(m.comanda.total)}
@@ -299,9 +362,25 @@ export default function MesasPage() {
                   )}
                 </div>
                 {selected.comanda && (
-                  <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                    Aberta há {timeAgo(selected.comanda.aberta_em)}
-                  </p>
+                  <div className="mt-0.5 space-y-0.5">
+                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      Aberta há {timeAgo(selected.comanda.aberta_em)}
+                      {selected.comanda.pessoas ? ` · ${selected.comanda.pessoas} pessoa(s)` : ''}
+                    </p>
+                    {(selected.comanda as any).clientes && (
+                      <p className="text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                        <UserCheck size={10} style={{ color: 'var(--green)' }} />
+                        {(selected.comanda as any).clientes.nome}
+                        <span style={{ color: 'var(--border-strong)' }}>·</span>
+                        {(selected.comanda as any).clientes.whatsapp}
+                      </p>
+                    )}
+                    {selected.comanda.observacao && (
+                      <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+                        {selected.comanda.observacao}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
               <button onClick={() => setSelected(null)}
@@ -525,8 +604,58 @@ export default function MesasPage() {
             </div>
 
             <div className="space-y-4">
+              {/* WhatsApp — primeiro campo, dispara lookup */}
               <div>
-                <label className="label">Número de pessoas</label>
+                <label className="label">
+                  WhatsApp <span style={{ color: 'var(--red)' }}>*</span>
+                </label>
+                <div className="relative">
+                  <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                  <input className="input pl-8"
+                    placeholder="(11) 99999-9999"
+                    inputMode="tel"
+                    value={checkinForm.whatsapp}
+                    onChange={e => {
+                      const v = e.target.value
+                      setCheckinForm(f => ({ ...f, whatsapp: v }))
+                      lookupWhatsapp(v)
+                    }} />
+                  {lookingUp && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2"><Spinner size={13} /></div>
+                  )}
+                </div>
+
+                {/* Lookup status */}
+                {clienteLookup && !lookingUp && (
+                  <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold"
+                    style={{
+                      background: clienteLookup.found ? 'var(--green-bg)' : 'var(--blue-bg)',
+                      border: `1px solid ${clienteLookup.found ? 'var(--green-border)' : 'var(--blue-border)'}`,
+                      color: clienteLookup.found ? 'var(--green)' : 'var(--blue)',
+                    }}>
+                    {clienteLookup.found
+                      ? <><UserCheck size={12} /> Cliente encontrado — {clienteLookup.cliente?.total_visits} visita(s) · {clienteLookup.cliente?.nome}</>
+                      : <><UserPlus size={12} /> Novo cliente — será cadastrado automaticamente</>
+                    }
+                  </div>
+                )}
+              </div>
+
+              {/* Nome */}
+              <div>
+                <label className="label">
+                  Nome do responsável <span style={{ color: 'var(--red)' }}>*</span>
+                </label>
+                <input className="input" placeholder="Ex: João Silva"
+                  value={checkinForm.nome}
+                  onChange={e => setCheckinForm(f => ({ ...f, nome: e.target.value }))} />
+              </div>
+
+              {/* Pessoas */}
+              <div>
+                <label className="label">
+                  Pessoas <span style={{ color: 'var(--text-muted)' }}>(opcional)</span>
+                </label>
                 <div className="flex gap-2">
                   {['1','2','3','4','5','6+'].map(n => (
                     <button key={n} onClick={() => setCheckinForm(f => ({ ...f, pessoas: n }))}
@@ -542,21 +671,18 @@ export default function MesasPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="label">Nome do responsável <span style={{ color: 'var(--text-muted)' }}>(opcional)</span></label>
-                <input className="input" placeholder="Ex: João Silva"
-                  value={checkinForm.nome}
-                  onChange={e => setCheckinForm(f => ({ ...f, nome: e.target.value }))} />
-              </div>
-
+              {/* Observação */}
               <div>
                 <label className="label">Observação <span style={{ color: 'var(--text-muted)' }}>(opcional)</span></label>
-                <input className="input" placeholder="Ex: aniversário, alergia..."
+                <input className="input" placeholder="Ex: aniversário, alergia, VIP..."
                   value={checkinForm.obs}
                   onChange={e => setCheckinForm(f => ({ ...f, obs: e.target.value }))} />
               </div>
 
-              <button onClick={confirmOpen} disabled={opening} className="btn-primary w-full py-3.5 text-sm">
+              <button
+                onClick={confirmOpen}
+                disabled={opening || !checkinForm.nome.trim() || checkinForm.whatsapp.replace(/\D/g,'').length < 10}
+                className="btn-primary w-full py-3.5 text-sm">
                 {opening ? <Spinner size={18} /> : <><Users size={16} /> Confirmar Abertura</>}
               </button>
             </div>
