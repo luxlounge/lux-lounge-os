@@ -113,22 +113,12 @@ export function NotificationBell() {
     return () => clearInterval(interval)
   }, [loadAlerts])
 
-  // Realtime com debounce: evita 4 queries × N eventos em burst
-  useEffect(() => {
-    function debouncedLoad() {
-      clearTimeout(rtDebounceRef.current)
-      rtDebounceRef.current = setTimeout(loadAlerts, 350)
-    }
-    const sub = supabase.channel('notif-bell-rt')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' },  debouncedLoad)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas' }, debouncedLoad)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, debouncedLoad)
-      .subscribe()
-    return () => {
-      clearTimeout(rtDebounceRef.current)
-      sub.unsubscribe()
-    }
-  }, [loadAlerts])
+  // Realtime temporariamente desativado
+useEffect(() => {
+  return () => {
+    clearTimeout(rtDebounceRef.current)
+  }
+}, [loadAlerts])
 
   // Close on click outside
   useEffect(() => {
