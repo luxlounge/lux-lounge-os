@@ -203,7 +203,7 @@ export default function DashboardPage() {
       { data: lowStock },
       { count: catCount },
       { count: prodCount },
-      { data: crmCountsRaw },         // Promise.resolve({
+      { data: crmCountsRaw },
   data: {
     total: 0,
     vip: 0,
@@ -240,6 +240,14 @@ export default function DashboardPage() {
       // RPC: agrega CRM no banco — substitui query unbounded de todos os clientes
       // e lê crm_config internamente. Elimina 2 queries, reduz payload de N rows → 5 números.
       Promise.resolve({
+  data: {
+    total: 0,
+    vip: 0,
+    frequente: 0,
+    novo: 0,
+    inativo: 0,
+  },
+}),
   data: {
     total: 0,
     vip: 0,
