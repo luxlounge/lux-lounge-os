@@ -201,17 +201,9 @@ export default function DashboardPage() {
       { data: activePedidos },
       { data: openComandas },
       { data: lowStock },
-      { count: catCount },
-      { count: prodCount },
-      { data: crmCountsRaw },
-  data: {
-    total: 0,
-    vip: 0,
-    frequente: 0,
-    novo: 0,
-    inativo: 0,
-  },
-}),() jsonb: total/vip/frequente/novo/inativo
+     { count: catCount },
+{ count: prodCount },
+{ data: crmCountsRaw },
     ] = await Promise.all([
       supabase.from('pagamentos').select('valor, created_at')
         .gte('created_at', start.toISOString()).lte('created_at', end.toISOString()),
@@ -239,7 +231,7 @@ export default function DashboardPage() {
       supabase.from('products').select('id',  { count: 'exact', head: true }).eq('active', true),
       // RPC: agrega CRM no banco — substitui query unbounded de todos os clientes
       // e lê crm_config internamente. Elimina 2 queries, reduz payload de N rows → 5 números.
-      Promise.resolve({
+     Promise.resolve({
   data: {
     total: 0,
     vip: 0,
@@ -248,14 +240,6 @@ export default function DashboardPage() {
     inativo: 0,
   },
 }),
-  data: {
-    total: 0,
-    vip: 0,
-    frequente: 0,
-    novo: 0,
-    inativo: 0,
-  },
-}),,
     ])
 
     // Revenue
