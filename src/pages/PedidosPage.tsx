@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import type { Pedido, PedidoItem } from '../types'
 import { Spinner } from '../components/ui/Spinner'
 import { Clock, Search } from 'lucide-react'
+import { PageHelp } from '../components/ui/PageHelp'
 import { format } from 'date-fns'
 
 const COLUMNS = [
@@ -84,7 +85,15 @@ export default function PedidosPage() {
       <div className="sticky top-0 z-20 px-4 md:px-8 pt-5 pb-4 shrink-0"
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-3">
-          <h1 className="page-header">Pedidos</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="page-header">Pedidos</h1>
+            <PageHelp title="Pedidos" lines={[
+              'Visualize todos os pedidos do salão organizados por status: Pendentes, Em Preparo e Entregues.',
+              'Pedidos pendentes precisam ser confirmados. Após confirmação, vão para preparo.',
+              'Use a busca pelo número da mesa para filtrar rapidamente.',
+              'Os pedidos atualizam em tempo real — não é necessário recarregar a tela.',
+            ]} />
+          </div>
           <div className="relative">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
             <input className="input pl-8 text-sm py-1.5" placeholder="Mesa..." style={{ width: 100 }}

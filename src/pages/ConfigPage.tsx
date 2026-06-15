@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { Modal } from '../components/ui/Modal'
 import { Spinner } from '../components/ui/Spinner'
 import { Plus, Users, LayoutGrid, Lock, Tag, Edit2, Trash2, Heart } from 'lucide-react'
+import { PageHelp } from '../components/ui/PageHelp'
 import { useToast } from '../components/ui/Toast'
 import type { Profile, Mesa, Categoria, CrmConfig } from '../types'
 import type { UserRole } from '../types'
@@ -251,7 +252,15 @@ export default function ConfigPage() {
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Configurações</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Configurações</h1>
+              <PageHelp title="Configurações" lines={[
+                'Gerencie usuários do sistema: crie contas para caixa e operadores com acesso controlado por função.',
+                'Gerencie as mesas do salão: adicione, edite nomes e altere status (disponível, reservada, manutenção).',
+                'Gerencie as categorias de produtos e defina quais aparecem no cardápio.',
+                'Em CRM, configure os critérios de classificação dos clientes: gasto mínimo VIP, visitas mínimas e dias de inatividade.',
+              ]} />
+            </div>
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
               {tab === 'users' ? `${profiles.length} usuários` : tab === 'tables' ? `${mesas.length} mesas` : tab === 'cats' ? `${categories.length} categorias` : 'Regras de segmentação CRM'}
             </p>

@@ -8,6 +8,7 @@ import {
   DollarSign, ChevronRight, Lock, CreditCard,
   Banknote, Smartphone, Gift, CheckCircle, RefreshCw,
 } from 'lucide-react'
+import { PageHelp } from '../components/ui/PageHelp'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { useToast } from '../components/ui/Toast'
@@ -134,7 +135,15 @@ export default function CaixaPage() {
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="page-header">Caixa</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="page-header">Caixa</h1>
+              <PageHelp title="Caixa" lines={[
+                'Visão geral de todas as comandas abertas no salão com totais e saldos pendentes.',
+                'Clique em uma comanda para abrir os detalhes: pedidos, pagamentos e opção de fechar.',
+                'Use esta tela para aprovação rápida de pedidos e para acompanhar o movimento financeiro do turno.',
+                'Comandas com saldo pendente ficam marcadas em destaque até o pagamento ser concluído.',
+              ]} />
+            </div>
             <p className="text-[12px] mt-0.5 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
               {comandas.length} {comandas.length === 1 ? 'comanda aberta' : 'comandas abertas'}
               <span className="inline-block w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: 'var(--green)' }} />

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Product, Categoria, RecipeItem, StockPurchase } from '../types'
 import { Modal } from '../components/ui/Modal'
+import { PageHelp } from '../components/ui/PageHelp'
 import { Spinner } from '../components/ui/Spinner'
 import { useToast } from '../components/ui/Toast'
 import {
@@ -306,7 +307,16 @@ export default function ProdutosPage() {
       <div className="sticky top-0 z-20 px-4 md:px-8 pt-5 pb-3"
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-3">
-          <h1 className="page-header">Produtos</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="page-header">Produtos</h1>
+            <PageHelp title="Produtos" lines={[
+              'Cadastre aqui tudo que é vendido no salão: bebidas, narguile, petiscos e insumos.',
+              'Produtos com "Ativo" ligado aparecem nos pedidos. Desative produtos fora de uso sem excluir.',
+              'Produtos marcados como Insumo são usados em fichas técnicas de outros produtos.',
+              'A ficha técnica define o que cada produto consome do estoque ao ser vendido.',
+              'O custo médio é calculado automaticamente conforme você registra compras no Estoque.',
+            ]} />
+          </div>
           <button onClick={openNew} className="btn-primary btn-sm">
             <Plus size={14} /> Novo
           </button>

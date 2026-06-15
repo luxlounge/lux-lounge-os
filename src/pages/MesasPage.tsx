@@ -7,6 +7,7 @@ import { SkeletonMesa } from '../components/ui/Skeleton'
 import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../components/ui/Toast'
 import { X, ChevronRight, Users, CheckCircle, Wrench, Unlock, CreditCard, DollarSign, Smartphone, Gift, Phone, UserCheck, UserPlus } from 'lucide-react'
+import { PageHelp } from '../components/ui/PageHelp'
 import { format } from 'date-fns'
 
 function timeAgo(iso: string) {
@@ -277,7 +278,15 @@ export default function MesasPage() {
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="page-header">Mesas</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="page-header">Mesas</h1>
+              <PageHelp title="Mesas" lines={[
+                'Acompanhe o salão em tempo real. Cada card mostra o status, cliente, consumo e tempo aberto.',
+                'Clique em uma mesa disponível (verde) para abrir e iniciar o atendimento.',
+                'Clique em uma mesa ocupada para entrar na comanda e lançar pedidos ou pagamentos.',
+                'Use o filtro "Ocupadas" para focar só nas mesas com atendimento em andamento.',
+              ]} />
+            </div>
             <p className="text-[12px] mt-0.5 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
               {ocupadas} ocupadas · {livres} disponíveis
               <span className="inline-block w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: 'var(--green)' }} />

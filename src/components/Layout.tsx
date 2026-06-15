@@ -2,12 +2,13 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, ClipboardList,
   ShoppingBag, Package, Settings, LogOut,
-  Menu, X, Sun, Moon, Landmark, Users,
+  Menu, X, Sun, Moon, Landmark, Users, BookOpen,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
+import { NotificationBell } from './ui/NotificationBell'
 
 const navItems = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard', roles: [] },
@@ -18,11 +19,12 @@ const navItems = [
   { to: '/estoque',  icon: Package,         label: 'Estoque',   roles: ['admin', 'caixa'] },
   { to: '/clientes', icon: Users,           label: 'Clientes',  roles: [] },
   { to: '/config',   icon: Settings,        label: 'Config',    roles: ['admin'] },
+  { to: '/guia',     icon: BookOpen,        label: 'Guia',      roles: [] },
 ]
 
 export function Layout({ children }: { children: ReactNode }) {
-  const location  = useLocation()
-  const navigate  = useNavigate()
+  const location    = useLocation()
+  const navigate    = useNavigate()
   const { profile } = useAuth()
   const { theme, toggle } = useTheme()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -46,12 +48,15 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* ── Desktop Sidebar ── */}
       <aside className="sidebar hidden md:flex flex-col w-[220px] shrink-0">
-        <div className="px-5 py-6" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-          <div className="flex items-center gap-2.5">
-            <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: 'var(--gold)' }} />
-            <span className="font-bold text-[15px] tracking-tight" style={{ color: 'var(--text-primary)' }}>
-              Lux Lounge
-            </span>
+        <div className="px-4 py-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: 'var(--gold)' }} />
+              <span className="font-bold text-[15px] tracking-tight" style={{ color: 'var(--text-primary)' }}>
+                Lux Lounge
+              </span>
+            </div>
+            <NotificationBell />
           </div>
           <p className="text-[10px] uppercase tracking-[0.18em] mt-1.5 pl-4" style={{ color: 'var(--text-muted)' }}>
             OS v2.0
@@ -103,6 +108,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <span className="font-bold text-[15px]" style={{ color: 'var(--text-primary)' }}>Lux Lounge</span>
         </div>
         <div className="flex items-center gap-2">
+          <NotificationBell />
           <button onClick={toggle} className="theme-toggle">
             {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
           </button>
@@ -142,7 +148,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* ── Mobile bottom nav ── */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex"
-        style={{ background: 'var(--bg-topbar)', borderBottom: '1px solid var(--border-subtle)', borderTop: '1px solid var(--border-subtle)' }}>
+        style={{ background: 'var(--bg-topbar)', borderTop: '1px solid var(--border-subtle)' }}>
         {filtered.map(({ to, icon: Icon, label }) => {
           const active = isActive(to)
           return (

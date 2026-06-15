@@ -8,6 +8,7 @@ import {
   Phone, Calendar, TrendingUp, FileText, Shield,
 } from 'lucide-react'
 import { format } from 'date-fns'
+import { PageHelp } from '../components/ui/PageHelp'
 import { ptBR } from 'date-fns/locale'
 
 // ─── Tag engine ────────────────────────────────────────────────
@@ -163,7 +164,15 @@ export default function ClientesPage() {
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="page-header">Clientes</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="page-header">Clientes</h1>
+              <PageHelp title="Clientes (CRM)" lines={[
+                'Todos os clientes cadastrados pelo WhatsApp durante o check-in aparecem aqui.',
+                'As tags (VIP, Frequente, Novo, Inativo) são calculadas automaticamente com base no histórico de visitas e gasto.',
+                'Clique em um cliente para ver o histórico completo, adicionar observações e marcar como VIP manualmente.',
+                'Os critérios das tags podem ser ajustados em Configurações > CRM.',
+              ]} />
+            </div>
             <p className="text-[12px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
               {clientes.length} cadastrados
             </p>

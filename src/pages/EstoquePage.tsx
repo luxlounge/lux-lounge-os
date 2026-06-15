@@ -5,6 +5,7 @@ import { Modal } from '../components/ui/Modal'
 import { Spinner } from '../components/ui/Spinner'
 import { useAuth } from '../hooks/useAuth'
 import { Plus, ArrowUp, ArrowDown, RefreshCw, AlertTriangle, Package } from 'lucide-react'
+import { PageHelp } from '../components/ui/PageHelp'
 import { format } from 'date-fns'
 
 export default function EstoquePage() {
@@ -73,7 +74,16 @@ export default function EstoquePage() {
       <div className="sticky top-0 z-20 px-4 md:px-8 pt-5 pb-3"
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="flex items-center justify-between mb-3">
-          <h1 className="page-header">Estoque</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="page-header">Estoque</h1>
+            <PageHelp title="Estoque" lines={[
+              'Acompanhe a quantidade disponível de cada produto ativo do sistema.',
+              'Use "Registrar Compra" para entrada de mercadoria. Isso atualiza o custo médio automaticamente.',
+              'Use "Movimento" para ajustes manuais: correção de contagem, perda ou descarte.',
+              'Produtos com estoque baixo (menos de 3) aparecem em vermelho e no alerta do Dashboard.',
+              'A baixa automática acontece toda vez que um pedido é confirmado.',
+            ]} />
+          </div>
           <div className="flex gap-2">
             <button onClick={load}
               className="w-9 h-9 flex items-center justify-center rounded-xl transition"

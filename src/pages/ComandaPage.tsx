@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { PageHelp } from '../components/ui/PageHelp'
 
 type PayMethod = 'dinheiro' | 'pix' | 'credito' | 'debito' | 'cortesia'
 
@@ -103,6 +104,9 @@ export default function ComandaPage() {
     if (!force && openOrders.length > 0) {
       if (!confirm(`Há ${openOrders.length} pedido(s) ainda em preparo. Fechar mesmo assim?`)) return
     }
+    if (!force && balance > 0.01) {
+      if (!confirm(`Fechar comanda com ${fmt(balance)} em aberto?`)) return
+    }
     setSaving(true)
     const { error } = await supabase.rpc('fn_fechar_comanda', { p_comanda_id: comanda.id })
     setSaving(false)
@@ -180,13 +184,21 @@ export default function ComandaPage() {
               </p>
             )}
           </div>
-          {isClosed
-            ? <span className="badge badge-gray text-[10px]">Fechada</span>
-            : <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--gold)' }}>
-                <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: 'var(--gold)' }} />
-                Aberta
-              </span>
-          }
+          <div className="flex items-center gap-2">
+            {isClosed
+              ? <span className="badge badge-gray text-[10px]">Fechada</span>
+              : <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--gold)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: 'var(--gold)' }} />
+                  Aberta
+                </span>
+            }
+            <PageHelp title="Comanda" lines={[
+              'Esta é a comanda ativa da mesa. Adicione pedidos pelo botão abaixo e registre os pagamentos.',
+              'Você pode registrar vários pagamentos parciais com métodos diferentes.',
+              'Para fechar, o total pago precisa ser igual ou maior ao consumo. Depois disso a mesa fica disponível.',
+              'Para transferir a mesa, use o botão de transferência — a comanda acompanha para a nova mesa.',
+            ]} />
+          </div>
         </div>
       </div>
 
@@ -224,7 +236,7 @@ export default function ComandaPage() {
               { icon: Plus,          label: 'Adicionar Pedido',    sub: 'novo item',                              action: () => setAddOrderModal(true), highlight: true,  disabled: false },
               { icon: DollarSign,    label: 'Registrar Pagamento', sub: balance > 0 ? fmt(balance)+' pendente' : 'quitado', action: () => setPayModal(true), highlight: false, disabled: false },
               { icon: ArrowRightLeft,label: 'Transferir Mesa',     sub: `${mesasDisp.length} disponíveis`,        action: () => setTransferModal(true), highlight: false, disabled: false },
-              { icon: CheckCircle,   label: 'Fechar Comanda',      sub: balance > 0.01 ? 'saldo pendente' : 'pronto', action: () => closeComanda(), disabled: balance > 0.01 && !canForceClose, highlight: false },
+              { icon: CheckCircle,   label: 'Fechar Comanda',      sub: balance > 0.01 ? 'saldo pendente' : 'pronto', action: () => closeComanda(), disabled: false, highlight: false },
             ].map(({ icon: Icon, label, sub, action, highlight, disabled }) => (
               <button key={label} onClick={action} disabled={disabled}
                 className="flex flex-col items-start p-4 rounded-2xl transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-left"
@@ -446,7 +458,7 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
     setSaving(true)
     const { data: pedido, error: pedidoErr } = await supabase
       .from('pedidos')
-      .insert({ comanda_id: comandaId, mesa_id: mesaId, observacao: observacao || null, criado_por: profile?.id })
+      .insert({ comanda_id: comandaId, mesa_id: mesaId, status: 'pendente', observacao: observacao || null, criado_por: profile?.id })
       .select()
       .single()
     if (pedidoErr || !pedido) { setSaving(false); return }
