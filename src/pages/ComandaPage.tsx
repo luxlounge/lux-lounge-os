@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import type { Comanda, Pedido, PedidoItem, Pagamento, Mesa, Categoria, Product } from '../types'
+import type { Comanda, Pedido, PedidoItem, Pagamento, Mesa, Categoria, Product, SelectedOption, ProductOptionGroup } from '../types'
 import { Modal } from '../components/ui/Modal'
+import { OptionsModal, type GroupWithOptions } from '../components/ui/OptionsModal'
 import { Spinner } from '../components/ui/Spinner'
 import { useAuth } from '../hooks/useAuth'
 import {
@@ -420,37 +421,92 @@ export default function ComandaPage() {
   )
 }
 
+type CartItem = {
+  cartKey: string
+  id: number
+  nome: string
+  preco: number
+  priceAdditions: number
+  qty: number
+  is_rosh: boolean
+  selectedOptions: SelectedOption[]
+}
+
 function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId: number; onDone: () => void }) {
   const { profile } = useAuth()
   const [categories, setCategories] = useState<Categoria[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [optionGroupsMap, setOptionGroupsMap] = useState<Record<number, GroupWithOptions[]>>({})
   const [selCat, setSelCat] = useState<number | null>(null)
-  const [cart, setCart] = useState<{ id: number; nome: string; preco: number; qty: number; is_rosh: boolean }[]>([])
+  const [cart, setCart] = useState<CartItem[]>([])
   const [observacao, setObservacao] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [pendingProduct, setPendingProduct] = useState<Product | null>(null)
 
   useEffect(() => {
     Promise.all([
       supabase.from('categorias').select('*').eq('exibe_cardapio', true).order('ordem'),
       supabase.from('products').select('*').eq('active', true).eq('exibe_cardapio', true).order('nome'),
-    ]).then(([{ data: cats }, { data: prods }]) => {
+    ]).then(async ([{ data: cats }, { data: prods }]) => {
       setCategories(cats ?? [])
       setProducts(prods ?? [])
       if (cats?.[0]) setSelCat(cats[0].id)
+
+      // Load option groups for all active products
+      const productIds = (prods ?? []).map(p => p.id)
+      if (productIds.length > 0) {
+        const { data: groups } = await supabase
+          .from('product_option_groups')
+          .select('*, product_options(*)')
+          .in('product_id', productIds)
+          .eq('ativo', true)
+          .order('ordem')
+        const map: Record<number, GroupWithOptions[]> = {}
+        for (const g of (groups ?? []) as (ProductOptionGroup & { product_options: { id: number; nome: string; price_delta: number; ativo: boolean }[] })[]) {
+          if (!map[g.product_id]) map[g.product_id] = []
+          map[g.product_id].push({
+            id: g.id,
+            nome: g.nome,
+            tipo: g.tipo,
+            obrigatorio: g.obrigatorio,
+            min_select: g.min_select,
+            max_select: g.max_select,
+            options: (g.product_options ?? []).filter(o => o.ativo).map(o => ({
+              id: o.id,
+              nome: o.nome,
+              price_delta: Number(o.price_delta),
+            })),
+          })
+        }
+        setOptionGroupsMap(map)
+      }
       setLoading(false)
     })
   }, [])
 
-  function add(p: Product) {
+  function handleProductClick(p: Product) {
+    const groups = optionGroupsMap[p.id]
+    if (groups && groups.length > 0) {
+      setPendingProduct(p)
+    } else {
+      addDirect(p, [], 0)
+    }
+  }
+
+  function addDirect(p: Product, selectedOptions: SelectedOption[], priceAdditions: number) {
+    const cartKey = selectedOptions.length > 0
+      ? `${p.id}-${selectedOptions.map(o => o.option_id).sort().join(',')}`
+      : `${p.id}`
     setCart(c => {
-      const ex = c.find(i => i.id === p.id)
-      if (ex) return c.map(i => i.id === p.id ? { ...i, qty: i.qty + 1 } : i)
-      return [...c, { id: p.id, nome: p.nome, preco: p.preco, qty: 1, is_rosh: p.is_rosh }]
+      const ex = c.find(i => i.cartKey === cartKey)
+      if (ex) return c.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + 1 } : i)
+      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions, qty: 1, is_rosh: p.is_rosh, selectedOptions }]
     })
   }
-  function remove(id: number) {
-    setCart(c => c.flatMap(i => i.id === id ? (i.qty > 1 ? [{ ...i, qty: i.qty - 1 }] : []) : [i]))
+
+  function remove(cartKey: string) {
+    setCart(c => c.flatMap(i => i.cartKey === cartKey ? (i.qty > 1 ? [{ ...i, qty: i.qty - 1 }] : []) : [i]))
   }
 
   async function submit() {
@@ -470,11 +526,12 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
       preco_unitario: i.preco,
       quantidade: i.qty,
       is_rosh: i.is_rosh,
-      total_item: i.preco * i.qty,
+      selected_options: i.selectedOptions.length > 0 ? i.selectedOptions : null,
+      price_additions: i.priceAdditions,
+      total_item: (i.preco + i.priceAdditions) * i.qty,
     }))
     await supabase.from('pedido_itens').insert(itens)
 
-    // Update comanda total without depending on a trigger
     const pedidoTotal = itens.reduce((s, i) => s + i.total_item, 0)
     const { data: currentComanda } = await supabase
       .from('comandas').select('total').eq('id', comandaId).single()
@@ -484,7 +541,6 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
         .eq('id', comandaId)
     }
 
-    // Auto stock deduction based on recipe (or self-deduction)
     const productIds = cart.map(i => i.id)
     const { data: recipes } = await supabase
       .from('product_recipe_items')
@@ -494,7 +550,6 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
     for (const cartItem of cart) {
       const itemRecipes = (recipes ?? []).filter(r => r.product_id === cartItem.id)
       if (itemRecipes.length > 0) {
-        // Deduct ingredients
         for (const r of itemRecipes) {
           const totalUsed = r.quantity_used * cartItem.qty
           const { data: ing } = await supabase
@@ -514,7 +569,6 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
           }
         }
       } else {
-        // No recipe: deduct product itself
         const { data: prod } = await supabase
           .from('products').select('stock_quantity').eq('id', cartItem.id).single()
         if (prod) {
@@ -540,11 +594,24 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
   if (loading) return <div className="flex justify-center py-10"><Spinner /></div>
 
   const filtered = selCat ? products.filter(p => p.categoria_id === selCat) : products
-  const cartTotal = cart.reduce((s, i) => s + i.preco * i.qty, 0)
+  const cartTotal = cart.reduce((s, i) => s + (i.preco + i.priceAdditions) * i.qty, 0)
   const cartCount = cart.reduce((s, i) => s + i.qty, 0)
 
   return (
     <div className="space-y-4">
+      {pendingProduct && (
+        <OptionsModal
+          productNome={pendingProduct.nome}
+          productPreco={pendingProduct.preco}
+          groups={optionGroupsMap[pendingProduct.id] ?? []}
+          onConfirm={(selectedOptions, priceAdditions) => {
+            addDirect(pendingProduct, selectedOptions, priceAdditions)
+            setPendingProduct(null)
+          }}
+          onClose={() => setPendingProduct(null)}
+        />
+      )}
+
       {/* Category tabs */}
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
         {categories.map(c => (
@@ -568,9 +635,11 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
       {/* Product grid */}
       <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
         {filtered.map(p => {
-          const inCart = cart.find(i => i.id === p.id)
+          const hasOptions = (optionGroupsMap[p.id]?.length ?? 0) > 0
+          const inCart = cart.some(i => i.id === p.id)
+          const cartQty = cart.filter(i => i.id === p.id).reduce((s, i) => s + i.qty, 0)
           return (
-            <button key={p.id} onClick={() => add(p)}
+            <button key={p.id} onClick={() => handleProductClick(p)}
               className="flex flex-col p-3 rounded-xl text-left transition active:scale-95"
               style={{
                 border: `1px solid ${inCart ? 'var(--gold-border)' : 'var(--border-default)'}`,
@@ -581,12 +650,15 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
                 <span className="text-xs font-bold font-mono" style={{ color: 'var(--gold)' }}>
                   R$ {Number(p.preco).toFixed(2).replace('.', ',')}
                 </span>
-                {inCart && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                    style={{ color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)' }}>
-                    {inCart.qty}×
-                  </span>
-                )}
+                <div className="flex items-center gap-1">
+                  {hasOptions && <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>+ops</span>}
+                  {inCart && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                      style={{ color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)' }}>
+                      {cartQty}×
+                    </span>
+                  )}
+                </div>
               </div>
             </button>
           )
@@ -603,13 +675,20 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
         <div className="rounded-xl p-3 space-y-2"
           style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
           {cart.map(i => (
-            <div key={i.id} className="flex items-center gap-2 text-sm">
-              <button onClick={() => remove(i.id)}
-                className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+            <div key={i.cartKey} className="flex items-start gap-2 text-sm">
+              <button onClick={() => remove(i.cartKey)}
+                className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5"
                 style={{ background: 'var(--red-bg)', color: 'var(--red)' }}>−</button>
-              <span className="flex-1" style={{ color: 'var(--text-primary)' }}>{i.qty}× {i.nome}</span>
-              <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
-                R$ {(i.preco * i.qty).toFixed(2).replace('.', ',')}
+              <div className="flex-1 min-w-0">
+                <span style={{ color: 'var(--text-primary)' }}>{i.qty}× {i.nome}</span>
+                {i.selectedOptions.length > 0 && (
+                  <p className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
+                    {i.selectedOptions.map(o => o.option_nome).join(', ')}
+                  </p>
+                )}
+              </div>
+              <span className="text-xs font-mono shrink-0" style={{ color: 'var(--text-muted)' }}>
+                R$ {((i.preco + i.priceAdditions) * i.qty).toFixed(2).replace('.', ',')}
               </span>
             </div>
           ))}

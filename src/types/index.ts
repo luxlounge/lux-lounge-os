@@ -109,6 +109,38 @@ export interface Pedido {
   pedido_itens?: PedidoItem[]
 }
 
+export interface SelectedOption {
+  group_id: number
+  group_nome: string
+  option_id: number
+  option_nome: string
+  price_delta: number
+}
+
+export interface ProductOptionGroup {
+  id: number
+  product_id: number
+  nome: string
+  tipo: 'single' | 'multiple'
+  obrigatorio: boolean
+  min_select: number
+  max_select: number
+  ordem: number
+  ativo: boolean
+  created_at: string
+  product_options?: ProductOption[]
+}
+
+export interface ProductOption {
+  id: number
+  group_id: number
+  nome: string
+  price_delta: number
+  ordem: number
+  ativo: boolean
+  created_at: string
+}
+
 export interface PedidoItem {
   id: number
   pedido_id: number
@@ -118,6 +150,8 @@ export interface PedidoItem {
   quantidade: number
   total_item: number
   is_rosh: boolean
+  selected_options?: SelectedOption[] | null
+  price_additions?: number
 }
 
 export interface Pagamento {
@@ -140,6 +174,17 @@ export interface StockPurchase {
   purchased_at: string
   created_by: string | null
   created_at: string
+}
+
+export interface OperationalNotification {
+  id: number
+  tipo: string
+  titulo: string
+  descricao: string | null
+  lida: boolean
+  created_at: string
+  action_url: string | null
+  ref_id: string | null
 }
 
 export interface EstoqueMovimento {
