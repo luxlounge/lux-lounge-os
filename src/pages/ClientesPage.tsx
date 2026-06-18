@@ -5,7 +5,7 @@ import { Spinner } from '../components/ui/Spinner'
 import { useToast } from '../components/ui/Toast'
 import {
   Search, X, Star, UserCheck, Clock, Users, ChevronRight,
-  Phone, Calendar, TrendingUp, FileText, Shield,
+  Phone, Calendar, TrendingUp, FileText, Shield, Gift,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { PageHelp } from '../components/ui/PageHelp'
@@ -59,6 +59,25 @@ const DEFAULT_CONFIG: CrmConfig = {
   updated_at: new Date().toISOString(),
 }
 
+const PAGE_SIZE = 50
+
+type TagFilter = 'todos' | 'vip' | 'frequente' | 'novo' | 'inativo'
+
+const TAG_FILTERS: { key: TagFilter; label: string }[] = [
+  { key: 'todos',     label: 'Todos' },
+  { key: 'vip',       label: '⭐ VIP' },
+  { key: 'frequente', label: 'Frequentes' },
+  { key: 'novo',      label: 'Novos' },
+  { key: 'inativo',   label: 'Inativos' },
+]
+
+function isBirthdayThisMonth(birthday: string | null): boolean {
+  if (!birthday) return false
+  const today = new Date()
+  const bd = new Date(birthday + 'T00:00:00')
+  return bd.getUTCMonth() === today.getMonth()
+}
+
 // ─── Main component ──────────────────────────────────────────
 export default function ClientesPage() {
   const { success: toast, error: toastError } = useToast()
@@ -66,13 +85,17 @@ export default function ClientesPage() {
   const [config, setConfig] = useState<CrmConfig>(DEFAULT_CONFIG)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [tagFilter, setTagFilter] = useState<TagFilter>('todos')
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   // Drawer
   const [selected, setSelected] = useState<Cliente | null>(null)
   const [drawerCmds, setDrawerCmds] = useState<(Comanda & { mesas?: Mesa })[]>([])
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [notes, setNotes] = useState('')
+  const [birthday, setBirthday] = useState('')
   const [savingVip, setSavingVip] = useState(false)
+  const [savingBirthday, setSavingBirthday] = useState(false)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async () => {
@@ -90,6 +113,7 @@ export default function ClientesPage() {
   async function openDrawer(c: Cliente) {
     setSelected(c)
     setNotes(c.notes ?? '')
+    setBirthday(c.birthday ?? '')
     setDrawerLoading(true)
     const { data } = await supabase
       .from('comandas')
@@ -116,6 +140,18 @@ export default function ClientesPage() {
     }, 1200)
   }
 
+  async function saveBirthday() {
+    if (!selected) return
+    setSavingBirthday(true)
+    const val = birthday.trim() || null
+    await supabase.from('clientes').update({ birthday: val }).eq('id', selected.id)
+    const updated = { ...selected, birthday: val }
+    setClientes(prev => prev.map(c => c.id === selected.id ? updated : c))
+    setSelected(updated)
+    setSavingBirthday(false)
+    toast('Aniversário salvo')
+  }
+
   async function toggleVip(c: Cliente) {
     setSavingVip(true)
     const next = !c.is_vip_manual
@@ -127,12 +163,22 @@ export default function ClientesPage() {
     toast(next ? '⭐ VIP manual ativado' : 'VIP manual removido')
   }
 
+  // ── Aniversariantes deste mês ─────────────────────────────────
+  const aniversariantes = clientes.filter(c => isBirthdayThisMonth(c.birthday))
+
   // ── Filtros ──────────────────────────────────────────────────
-  const searchLow = search.toLowerCase().replace(/\D/g, '') || search.toLowerCase()
-  const filtered = clientes.filter(c =>
-    c.nome.toLowerCase().includes(search.toLowerCase()) ||
-    c.whatsapp.replace(/\D/g, '').includes(search.replace(/\D/g, ''))
-  )
+  const filtered = clientes.filter(c => {
+    const matchSearch = c.nome.toLowerCase().includes(search.toLowerCase()) ||
+      c.whatsapp.replace(/\D/g, '').includes(search.replace(/\D/g, ''))
+    if (!matchSearch) return false
+    if (tagFilter === 'todos') return true
+    return getTags(c, config).includes(tagFilter)
+  })
+
+  const visible = filtered.slice(0, visibleCount)
+
+  // Reset pagination on filter change
+  useEffect(() => { setVisibleCount(PAGE_SIZE) }, [search, tagFilter])
 
   // ── Stat counts ──────────────────────────────────────────────
   const counts = clientes.reduce(
@@ -180,7 +226,7 @@ export default function ClientesPage() {
         </div>
 
         {/* Search */}
-        <div className="relative">
+        <div className="relative mb-3">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
           <input className="input pl-9 text-sm" placeholder="Buscar por nome ou WhatsApp..."
             value={search} onChange={e => setSearch(e.target.value)} />
@@ -192,12 +238,67 @@ export default function ClientesPage() {
             </button>
           )}
         </div>
+
+        {/* Tag filter chips */}
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {TAG_FILTERS.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setTagFilter(f.key)}
+              className="shrink-0 text-[11px] font-semibold px-3 py-1 rounded-full transition"
+              style={{
+                background: tagFilter === f.key ? 'var(--gold)' : 'var(--bg-raised)',
+                color: tagFilter === f.key ? '#000' : 'var(--text-secondary)',
+                border: `1px solid ${tagFilter === f.key ? 'var(--gold)' : 'var(--border-default)'}`,
+              }}
+            >
+              {f.label}
+              {f.key !== 'todos' && (
+                <span className="ml-1 opacity-70">
+                  {f.key === 'vip' ? counts.vip : f.key === 'frequente' ? counts.frequente : f.key === 'novo' ? counts.novo : counts.inativo}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="p-4 md:p-8 space-y-4">
 
+        {/* Aniversariantes do mês */}
+        {aniversariantes.length > 0 && !search && tagFilter === 'todos' && (
+          <div className="rounded-2xl overflow-hidden"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--gold-border)' }}>
+            <div className="px-4 py-3 flex items-center gap-2"
+              style={{ background: 'var(--gold-bg)', borderBottom: '1px solid var(--gold-border)' }}>
+              <Gift size={13} style={{ color: 'var(--gold)' }} />
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--gold)' }}>
+                Aniversariantes este mês ({aniversariantes.length})
+              </span>
+            </div>
+            <div className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
+              {aniversariantes.map(c => {
+                const bd = new Date(c.birthday! + 'T00:00:00')
+                return (
+                  <button key={c.id} onClick={() => openDrawer(c)}
+                    className="w-full text-left px-4 py-3 flex items-center gap-3 transition hover:opacity-80">
+                    <Gift size={14} style={{ color: 'var(--gold)' }} />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{c.nome}</span>
+                      <span className="ml-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                        dia {bd.getUTCDate()}
+                      </span>
+                    </div>
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{c.whatsapp}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* CRM stat strip */}
-        {!search && (
+        {!search && tagFilter === 'todos' && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {[
               { label: 'VIPs',       value: counts.vip,       icon: Star,      color: 'var(--gold)' },
@@ -222,13 +323,13 @@ export default function ClientesPage() {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Users size={28} className="mb-3" style={{ color: 'var(--border-strong)' }} />
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              {search ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado ainda'}
+              {search || tagFilter !== 'todos' ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado ainda'}
             </p>
           </div>
         )}
 
         <div className="space-y-2">
-          {filtered.map(c => {
+          {visible.map(c => {
             const tags = getTags(c, config)
             const ticket = c.total_visits > 0 ? Number(c.total_spent) / c.total_visits : 0
             return (
@@ -241,6 +342,9 @@ export default function ClientesPage() {
                       <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
                         {c.nome}
                       </span>
+                      {c.birthday && isBirthdayThisMonth(c.birthday) && (
+                        <Gift size={11} style={{ color: 'var(--gold)' }} />
+                      )}
                       {tags.map(t => <TagBadge key={t} tag={t} />)}
                     </div>
                     <p className="text-xs flex items-center gap-1 mb-2" style={{ color: 'var(--text-muted)' }}>
@@ -275,6 +379,19 @@ export default function ClientesPage() {
             )
           })}
         </div>
+
+        {/* Carregar mais */}
+        {visibleCount < filtered.length && (
+          <div className="flex justify-center pt-2">
+            <button
+              onClick={() => setVisibleCount(v => v + PAGE_SIZE)}
+              className="text-sm font-semibold px-6 py-2.5 rounded-xl transition"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}
+            >
+              Carregar mais ({filtered.length - visibleCount} restantes)
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Drawer: perfil do cliente ── */}
@@ -347,6 +464,30 @@ export default function ClientesPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Aniversário */}
+              <div>
+                <label className="flex items-center gap-1.5 mb-2 text-xs font-semibold uppercase tracking-wider"
+                  style={{ color: 'var(--text-muted)' }}>
+                  <Gift size={10} /> Data de Aniversário
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    className="input text-sm flex-1"
+                    value={birthday}
+                    onChange={e => setBirthday(e.target.value)}
+                  />
+                  <button
+                    onClick={saveBirthday}
+                    disabled={savingBirthday}
+                    className="px-4 py-2 rounded-xl text-xs font-bold transition"
+                    style={{ background: 'var(--gold)', color: '#000' }}
+                  >
+                    {savingBirthday ? <Spinner size={12} /> : 'Salvar'}
+                  </button>
+                </div>
               </div>
 
               {/* VIP manual toggle */}

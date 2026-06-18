@@ -142,13 +142,8 @@ export default function MesasPage() {
     let clienteId: number
     if (clienteLookup?.found && clienteLookup.cliente) {
       clienteId = clienteLookup.cliente.id
-      const { data: cli } = await supabase
-        .from('clientes').select('total_visits').eq('id', clienteId).single()
-      await supabase.from('clientes').update({
-        last_visit: new Date().toISOString(),
-        total_visits: (cli?.total_visits ?? 0) + 1,
-        nome: nomeClean,
-      }).eq('id', clienteId)
+      await supabase.from('clientes').update({ nome: nomeClean }).eq('id', clienteId)
+      await supabase.rpc('fn_checkin_cliente', { p_cliente_id: clienteId })
     } else {
       const { data: newCli, error: cliErr } = await supabase
         .from('clientes')

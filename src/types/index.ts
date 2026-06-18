@@ -71,6 +71,7 @@ export interface Cliente {
   total_spent: number
   notes: string | null
   is_vip_manual: boolean
+  birthday: string | null
 }
 
 export interface CrmConfig {
