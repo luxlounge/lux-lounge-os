@@ -25,8 +25,10 @@ export function NotificationBell() {
   const navigate               = useNavigate()
   const ref                    = useRef<HTMLDivElement>(null)
   const rtDebounceRef          = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const channelName            = useRef(`notif-bell-${Math.random().toString(36).slice(2)}`).current
 
   const loadAlerts = useCallback(async () => {
+    try {
     const now        = Date.now()
     const fourHrsAgo = new Date(now - 4 * 3600000).toISOString()
     const tenMinsAgo = new Date(now - 10 * 60000).toISOString()
@@ -106,6 +108,9 @@ export function NotificationBell() {
     }
 
     setAlerts(next)
+    } catch (err) {
+      console.error('NotificationBell loadAlerts:', err)
+    }
   }, [])
 
   useEffect(() => {
@@ -120,7 +125,7 @@ export function NotificationBell() {
       clearTimeout(rtDebounceRef.current)
       rtDebounceRef.current = setTimeout(loadAlerts, 350)
     }
-    const sub = supabase.channel('notif-bell-rt')
+    const sub = supabase.channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' },  debouncedLoad)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas' }, debouncedLoad)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, debouncedLoad)

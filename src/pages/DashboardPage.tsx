@@ -187,6 +187,7 @@ export default function DashboardPage() {
 
   const loadStats = useCallback(async () => {
     setLoading(true)
+    try {
     const { start, end, prevStart, prevEnd } = getPeriodRange(period)
     const now = Date.now()
 
@@ -194,8 +195,8 @@ export default function DashboardPage() {
       { data: payments },
       { data: prevPayments },
       { data: closedComandas },
-      { count: novosClientesCount },  // count-only: sem trazer rows
-      { count: recurrentesCount },    // count-only: sem trazer rows
+      { count: novosClientesCount },
+      { count: recurrentesCount },
       { data: pedidoItens },
       { data: allMesas },
       { data: activePedidos },
@@ -203,7 +204,7 @@ export default function DashboardPage() {
       { data: lowStock },
       { count: catCount },
       { count: prodCount },
-      { data: crmCountsRaw },         // fn_crm_counts() jsonb: total/vip/frequente/novo/inativo
+      { data: crmCountsRaw },
     ] = await Promise.all([
       supabase.from('pagamentos').select('valor, created_at')
         .gte('created_at', start.toISOString()).lte('created_at', end.toISOString()),
@@ -229,9 +230,8 @@ export default function DashboardPage() {
         .eq('active', true).lt('stock_quantity', 5).order('stock_quantity'),
       supabase.from('categorias').select('id', { count: 'exact', head: true }),
       supabase.from('products').select('id',  { count: 'exact', head: true }).eq('active', true),
-      // RPC: agrega CRM no banco — substitui query unbounded de todos os clientes
-      // e lê crm_config internamente. Elimina 2 queries, reduz payload de N rows → 5 números.
-      supabase.rpc('fn_crm_counts'),
+      // RPC opcional — fallback seguro se fn_crm_counts não existir no banco
+      Promise.resolve(supabase.rpc('fn_crm_counts')).catch(() => ({ data: null, error: null })),
     ])
 
     // Revenue
@@ -321,6 +321,10 @@ export default function DashboardPage() {
       catCount: catCount ?? 0, prodCount: prodCount ?? 0, mesaCount: allMesas?.length ?? 0,
     })
     setLoading(false)
+    } catch (err) {
+      console.error('DashboardPage loadStats:', err)
+      setLoading(false)
+    }
   }, [period])
 
   useEffect(() => { loadStats() }, [loadStats])

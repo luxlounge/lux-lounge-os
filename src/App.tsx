@@ -1,4 +1,4 @@
-import React from "react"
+import React, { Component } from "react"
 import { createContext, Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthContext, useAuthState } from './hooks/useAuth'
@@ -22,6 +22,28 @@ const QRMenuPage   = lazy(() => import('./pages/qr/QRMenuPage'))
 const GuidePage     = lazy(() => import('./pages/GuidePage'))
 const ProducaoPage  = lazy(() => import('./pages/ProducaoPage'))
 
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(e: Error) { return { error: e } }
+  componentDidCatch(e: Error, info: React.ErrorInfo) { console.error('ErrorBoundary:', e, info) }
+  render() {
+    if (this.state.error) return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', gap: 12, padding: 24 }}>
+        <span style={{ fontSize: 32 }}>⚠️</span>
+        <p style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 16 }}>Erro inesperado</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', maxWidth: 320 }}>
+          {(this.state.error as Error).message}
+        </p>
+        <button onClick={() => { this.setState({ error: null }); window.location.reload() }}
+          style={{ marginTop: 8, padding: '8px 20px', borderRadius: 8, background: 'var(--gold)', color: '#000', fontWeight: 600, fontSize: 14, border: 'none', cursor: 'pointer' }}>
+          Recarregar
+        </button>
+      </div>
+    )
+    return this.props.children
+  }
+}
+
 function Loading() {
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
@@ -42,6 +64,7 @@ export default function App() {
   const authState = useAuthState()
 
   return (
+    <ErrorBoundary>
     <ThemeProvider>
       <ToastProvider>
       <AuthContext.Provider value={authState}>
@@ -77,5 +100,6 @@ export default function App() {
       </AuthContext.Provider>
       </ToastProvider>
     </ThemeProvider>
+    </ErrorBoundary>
   )
 }
