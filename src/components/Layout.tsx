@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, ClipboardList,
   ShoppingBag, Package, Settings, LogOut,
-  Menu, X, Sun, Moon, Landmark, Users, BookOpen,
+  Menu, X, Sun, Moon, Landmark, Users, BookOpen, ChefHat,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
@@ -14,7 +14,8 @@ const navItems = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard', roles: [] },
   { to: '/mesas',    icon: LayoutGrid,      label: 'Mesas',     roles: [] },
   { to: '/caixa',    icon: Landmark,        label: 'Caixa',     roles: ['admin', 'caixa'] },
-  { to: '/pedidos',  icon: ClipboardList,   label: 'Pedidos',   roles: [] },
+  { to: '/pedidos',   icon: ClipboardList,   label: 'Pedidos',   roles: [] },
+  { to: '/producao',  icon: ChefHat,         label: 'Produção',  roles: [] },
   { to: '/produtos', icon: ShoppingBag,     label: 'Produtos',  roles: [] },
   { to: '/estoque',  icon: Package,         label: 'Estoque',   roles: ['admin', 'caixa'] },
   { to: '/clientes', icon: Users,           label: 'Clientes',  roles: [] },

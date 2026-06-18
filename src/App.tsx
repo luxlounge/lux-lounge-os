@@ -19,7 +19,8 @@ const ClientesPage = lazy(() => import('./pages/ClientesPage'))
 const ConfigPage   = lazy(() => import('./pages/ConfigPage'))
 const CaixaPage    = lazy(() => import('./pages/CaixaPage'))
 const QRMenuPage   = lazy(() => import('./pages/qr/QRMenuPage'))
-const GuidePage    = lazy(() => import('./pages/GuidePage'))
+const GuidePage     = lazy(() => import('./pages/GuidePage'))
+const ProducaoPage  = lazy(() => import('./pages/ProducaoPage'))
 
 function Loading() {
   return (
@@ -64,7 +65,8 @@ export default function App() {
                       <Route path="/clientes" element={<ClientesPage />} />
                       <Route path="/caixa"    element={<CaixaPage />} />
                       <Route path="/config"   element={<ConfigPage />} />
-                      <Route path="/guia"    element={<GuidePage />} />
+                      <Route path="/guia"      element={<GuidePage />} />
+                      <Route path="/producao"  element={<ProducaoPage />} />
                     </Routes>
                   </Layout>
                 </PrivateRoute>

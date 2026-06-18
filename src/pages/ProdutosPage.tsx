@@ -1,13 +1,13 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Product, Categoria, RecipeItem, StockPurchase } from '../types'
+import type { Product, Categoria, RecipeItem, StockPurchase, ProductOptionGroup, ProductOption } from '../types'
 import { Modal } from '../components/ui/Modal'
 import { PageHelp } from '../components/ui/PageHelp'
 import { Spinner } from '../components/ui/Spinner'
 import { useToast } from '../components/ui/Toast'
 import {
   Plus, Edit2, Search, Wind, ShoppingBag, Upload, X, BookOpen,
-  Trash2, DollarSign, ShoppingCart, Calendar,
+  Trash2, DollarSign, ShoppingCart, Calendar, SlidersHorizontal,
 } from 'lucide-react'
 
 const UNIT_LABELS: Record<string, string> = {
@@ -58,6 +58,16 @@ export default function ProdutosPage() {
   const [purchasesLoading, setPurchasesLoading] = useState(false)
   const [purchaseForm, setPurchaseForm] = useState({ quantity: '', unit_cost: '', supplier: '', purchased_at: new Date().toISOString().slice(0, 10) })
   const [savingPurchase, setSavingPurchase] = useState(false)
+
+  // Options modal
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [optionsProduct, setOptionsProduct] = useState<Product | null>(null)
+  const [optionGroups, setOptionGroups] = useState<ProductOptionGroup[]>([])
+  const [optionsLoading, setOptionsLoading] = useState(false)
+  const [newGroupForm, setNewGroupForm] = useState({ nome: '', tipo: 'single' as 'single' | 'multiple', obrigatorio: false, min_select: '0', max_select: '1' })
+  const [savingGroup, setSavingGroup] = useState(false)
+  const [newOptionForms, setNewOptionForms] = useState<Record<number, { nome: string; price_delta: string }>>({})
+  const [savingOption, setSavingOption] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     const [{ data: ps }, { data: cats }] = await Promise.all([
@@ -283,6 +293,79 @@ export default function ProdutosPage() {
     load()
   }
 
+  // — Options modal —
+  async function openOptions(p: Product) {
+    setOptionsProduct(p)
+    setOptionsLoading(true)
+    setOptionsOpen(true)
+    setOptionGroups([])
+    const { data } = await supabase
+      .from('product_option_groups')
+      .select('*, product_options(*)')
+      .eq('product_id', p.id)
+      .eq('ativo', true)
+      .order('ordem')
+    const groups = (data ?? []) as ProductOptionGroup[]
+    setOptionGroups(groups)
+    const forms: Record<number, { nome: string; price_delta: string }> = {}
+    for (const g of groups) forms[g.id] = { nome: '', price_delta: '0' }
+    setNewOptionForms(forms)
+    setOptionsLoading(false)
+  }
+
+  async function addGroup() {
+    if (!optionsProduct || !newGroupForm.nome.trim()) return
+    setSavingGroup(true)
+    const { data } = await supabase.from('product_option_groups').insert({
+      product_id: optionsProduct.id,
+      nome: newGroupForm.nome.trim(),
+      tipo: newGroupForm.tipo,
+      obrigatorio: newGroupForm.obrigatorio,
+      min_select: parseInt(newGroupForm.min_select) || 0,
+      max_select: parseInt(newGroupForm.max_select) || 1,
+      ordem: optionGroups.length,
+    }).select('*, product_options(*)').single()
+    setSavingGroup(false)
+    if (data) {
+      setOptionGroups(gs => [...gs, data as ProductOptionGroup])
+      setNewOptionForms(f => ({ ...f, [(data as ProductOptionGroup).id]: { nome: '', price_delta: '0' } }))
+      setNewGroupForm({ nome: '', tipo: 'single', obrigatorio: false, min_select: '0', max_select: '1' })
+      toast('Grupo criado')
+    }
+  }
+
+  async function deleteGroup(groupId: number) {
+    await supabase.from('product_option_groups').update({ ativo: false }).eq('id', groupId)
+    setOptionGroups(gs => gs.filter(g => g.id !== groupId))
+    toast('Grupo removido')
+  }
+
+  async function addOption(groupId: number) {
+    const form = newOptionForms[groupId]
+    if (!form?.nome.trim()) return
+    setSavingOption(groupId)
+    const { data } = await supabase.from('product_options').insert({
+      group_id: groupId,
+      nome: form.nome.trim(),
+      price_delta: parseFloat(form.price_delta.replace(',', '.')) || 0,
+      ordem: (optionGroups.find(g => g.id === groupId)?.product_options?.length ?? 0),
+    }).select().single()
+    setSavingOption(null)
+    if (data) {
+      setOptionGroups(gs => gs.map(g => g.id === groupId
+        ? { ...g, product_options: [...(g.product_options ?? []), data as ProductOption] }
+        : g))
+      setNewOptionForms(f => ({ ...f, [groupId]: { nome: '', price_delta: '0' } }))
+    }
+  }
+
+  async function deleteOption(groupId: number, optionId: number) {
+    await supabase.from('product_options').update({ ativo: false }).eq('id', optionId)
+    setOptionGroups(gs => gs.map(g => g.id === groupId
+      ? { ...g, product_options: (g.product_options ?? []).filter(o => o.id !== optionId) }
+      : g))
+  }
+
   const filtered = products.filter(p => {
     const matchSearch = p.nome.toLowerCase().includes(search.toLowerCase())
     const matchCat = selCat === null || p.categoria_id === selCat
@@ -426,21 +509,26 @@ export default function ProdutosPage() {
                 )}
 
                 {/* Actions */}
-                <div className="mt-3 flex gap-1.5">
+                <div className="mt-3 grid grid-cols-2 gap-1.5">
                   <button onClick={() => openEdit(p)}
-                    className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
+                    className="flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
                     style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
                     <Edit2 size={10} /> Editar
                   </button>
                   <button onClick={() => openPurchases(p)}
-                    className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
+                    className="flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
                     style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
                     <ShoppingCart size={10} /> Compras
                   </button>
                   <button onClick={() => openRecipe(p)}
-                    className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
+                    className="flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
                     style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
                     <BookOpen size={10} /> Ficha
+                  </button>
+                  <button onClick={() => openOptions(p)}
+                    className="flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
+                    style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
+                    <SlidersHorizontal size={10} /> Opções
                   </button>
                 </div>
               </div>
@@ -736,6 +824,110 @@ export default function ProdutosPage() {
                 <DollarSign size={15} /> Salvar custo calculado no produto
               </button>
             )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Options Modal */}
+      <Modal open={optionsOpen} onClose={() => setOptionsOpen(false)} title={`Opções — ${optionsProduct?.nome ?? ''}`} size="lg">
+        {optionsLoading ? (
+          <div className="flex justify-center py-10"><Spinner /></div>
+        ) : (
+          <div className="space-y-5">
+            {optionGroups.length === 0 && (
+              <p className="text-sm text-center py-2" style={{ color: 'var(--text-muted)' }}>
+                Nenhum grupo de opções. Crie o primeiro abaixo.
+              </p>
+            )}
+
+            {optionGroups.map(group => (
+              <div key={group.id} className="rounded-xl p-3 space-y-2"
+                style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{group.nome}</span>
+                    <span className="ml-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      {group.tipo === 'single' ? 'Seleção única' : `Múltipla · até ${group.max_select}`}
+                      {group.obrigatorio ? ' · Obrigatório' : ''}
+                    </span>
+                  </div>
+                  <button onClick={() => deleteGroup(group.id)}
+                    className="w-6 h-6 flex items-center justify-center rounded-lg transition"
+                    style={{ color: 'var(--red)', border: '1px solid var(--border-default)', background: 'var(--bg-base)' }}>
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  {(group.product_options ?? []).filter(o => o.ativo).map(opt => (
+                    <div key={opt.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg"
+                      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+                      <span className="flex-1 text-xs" style={{ color: 'var(--text-primary)' }}>{opt.nome}</span>
+                      <span className="text-xs font-mono" style={{ color: opt.price_delta > 0 ? 'var(--gold)' : 'var(--text-muted)' }}>
+                        {opt.price_delta > 0 ? `+R$ ${Number(opt.price_delta).toFixed(2).replace('.', ',')}` : 'grátis'}
+                      </span>
+                      <button onClick={() => deleteOption(group.id, opt.id)}
+                        className="w-5 h-5 flex items-center justify-center rounded transition"
+                        style={{ color: 'var(--red)' }}>
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <input className="input text-xs flex-1" placeholder="Nome da opção"
+                    value={newOptionForms[group.id]?.nome ?? ''}
+                    onChange={e => setNewOptionForms(f => ({ ...f, [group.id]: { ...f[group.id], nome: e.target.value } }))} />
+                  <input className="input text-xs w-24" placeholder="+R$ 0,00"
+                    value={newOptionForms[group.id]?.price_delta ?? '0'}
+                    onChange={e => setNewOptionForms(f => ({ ...f, [group.id]: { ...f[group.id], price_delta: e.target.value } }))} />
+                  <button onClick={() => addOption(group.id)}
+                    disabled={!newOptionForms[group.id]?.nome.trim() || savingOption === group.id}
+                    className="btn-secondary px-3 py-1.5 text-xs">
+                    {savingOption === group.id ? <Spinner size={12} /> : <Plus size={12} />}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {/* New group form */}
+            <div className="rounded-xl p-3 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Novo Grupo</p>
+              <div>
+                <label className="label">Nome do grupo</label>
+                <input className="input text-sm" placeholder="Ex: Ponto da carne, Adicionais, Tamanho"
+                  value={newGroupForm.nome}
+                  onChange={e => setNewGroupForm(f => ({ ...f, nome: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">Tipo</label>
+                  <select className="input text-sm" value={newGroupForm.tipo}
+                    onChange={e => setNewGroupForm(f => ({ ...f, tipo: e.target.value as 'single' | 'multiple' }))}>
+                    <option value="single">Seleção única</option>
+                    <option value="multiple">Múltipla escolha</option>
+                  </select>
+                </div>
+                {newGroupForm.tipo === 'multiple' && (
+                  <div>
+                    <label className="label">Máx. seleções</label>
+                    <input type="number" className="input text-sm" value={newGroupForm.max_select}
+                      onChange={e => setNewGroupForm(f => ({ ...f, max_select: e.target.value }))} />
+                  </div>
+                )}
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                <input type="checkbox" checked={newGroupForm.obrigatorio}
+                  onChange={e => setNewGroupForm(f => ({ ...f, obrigatorio: e.target.checked }))}
+                  className="w-3.5 h-3.5" style={{ accentColor: 'var(--gold)' }} />
+                Obrigatório
+              </label>
+              <button onClick={addGroup} disabled={!newGroupForm.nome.trim() || savingGroup}
+                className="btn-primary w-full py-3">
+                {savingGroup ? <Spinner size={16} /> : <><Plus size={14} /> Criar Grupo</>}
+              </button>
+            </div>
           </div>
         )}
       </Modal>

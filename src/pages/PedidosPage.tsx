@@ -60,7 +60,10 @@ export default function PedidosPage() {
 
   async function cancel(pedido: Pedido) {
     if (!confirm('Cancelar este pedido?')) return
-    await supabase.from('pedidos').update({ status: 'cancelado' }).eq('id', pedido.id)
+    const { error: upErr } = await supabase.from('pedidos').update({ status: 'cancelado' }).eq('id', pedido.id)
+    if (upErr) { console.error('cancel pedido:', upErr); return }
+    const { error: rpcErr } = await supabase.rpc('cancelar_venda_estoque', { p_pedido_id: pedido.id, p_user_id: null })
+    if (rpcErr) console.error('cancelar_venda_estoque:', rpcErr)
     load()
   }
 
@@ -215,9 +218,16 @@ export default function PedidosPage() {
                               <span className="font-mono font-bold text-sm w-6 shrink-0" style={{ color: 'var(--gold)' }}>
                                 {item.quantidade}×
                               </span>
-                              <span className="text-sm leading-snug" style={{ color: 'var(--text-primary)' }}>
-                                {item.nome_produto}
-                              </span>
+                              <div className="min-w-0">
+                                <span className="text-sm leading-snug" style={{ color: 'var(--text-primary)' }}>
+                                  {item.nome_produto}
+                                </span>
+                                {item.selected_options && item.selected_options.length > 0 && (
+                                  <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                                    {item.selected_options.map(o => o.option_nome).join(' · ')}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>

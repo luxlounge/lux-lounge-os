@@ -2,11 +2,22 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { Spinner } from '../../components/ui/Spinner'
+import { OptionsModal, type GroupWithOptions } from '../../components/ui/OptionsModal'
+import type { SelectedOption } from '../../types'
 import { ShoppingCart, Plus, Minus, Send, CheckCircle, Wind } from 'lucide-react'
 
 interface Categoria { id: number; nome: string; ordem: number }
 interface Produto { id: number; nome: string; categoria_id: number; preco: number; stock_quantity: number; is_rosh: boolean }
-interface CartItem { id: number; nome: string; preco: number; qty: number; is_rosh: boolean }
+interface CartItem {
+  cartKey: string
+  id: number
+  nome: string
+  preco: number
+  priceAdditions: number
+  qty: number
+  is_rosh: boolean
+  selectedOptions: SelectedOption[]
+}
 
 export default function QRMenuPage() {
   const { mesaNumber } = useParams<{ mesaNumber: string }>()
@@ -14,7 +25,9 @@ export default function QRMenuPage() {
   const [comanda, setComanda] = useState<{ id: number } | null>(null)
   const [categories, setCategories] = useState<Categoria[]>([])
   const [products, setProducts] = useState<Produto[]>([])
+  const [optionGroupsMap, setOptionGroupsMap] = useState<Record<number, GroupWithOptions[]>>({})
   const [cart, setCart] = useState<CartItem[]>([])
+  const [pendingProduct, setPendingProduct] = useState<Produto | null>(null)
   const [selCat, setSelCat] = useState<number | null>(null)
   const [customerName, setCustomerName] = useState('')
   const [loading, setLoading] = useState(true)
@@ -38,58 +51,98 @@ export default function QRMenuPage() {
       setCategories(cats ?? [])
       setProducts(prods ?? [])
       if (cats?.[0]) setSelCat(cats[0].id)
+
+      const productIds = (prods ?? []).map(p => p.id)
+      if (productIds.length > 0) {
+        const { data: groups } = await supabase
+          .from('product_option_groups')
+          .select('*, product_options(*)')
+          .in('product_id', productIds)
+          .eq('ativo', true)
+          .order('ordem')
+        const map: Record<number, GroupWithOptions[]> = {}
+        for (const g of (groups ?? []) as (GroupWithOptions & { product_id: number; product_options: { id: number; nome: string; price_delta: number; ativo: boolean }[] })[]) {
+          if (!map[g.product_id]) map[g.product_id] = []
+          map[g.product_id].push({
+            id: g.id,
+            nome: g.nome,
+            tipo: g.tipo,
+            obrigatorio: g.obrigatorio,
+            min_select: g.min_select,
+            max_select: g.max_select,
+            options: (g.product_options ?? []).filter(o => o.ativo).map(o => ({
+              id: o.id,
+              nome: o.nome,
+              price_delta: Number(o.price_delta),
+            })),
+          })
+        }
+        setOptionGroupsMap(map)
+      }
+
       setLoading(false)
     }
     init()
   }, [mesaNumber])
 
-  function addToCart(p: Produto) {
+  function handleProductClick(p: Produto) {
+    const groups = optionGroupsMap[p.id]
+    if (groups && groups.length > 0) {
+      setPendingProduct(p)
+    } else {
+      addDirect(p, [], 0)
+    }
+  }
+
+  function addDirect(p: Produto, selectedOptions: SelectedOption[], priceAdditions: number) {
+    const cartKey = selectedOptions.length > 0
+      ? `${p.id}-${selectedOptions.map(o => o.option_id).sort().join(',')}`
+      : `${p.id}`
     setCart(c => {
-      const ex = c.find(i => i.id === p.id)
-      if (ex) return c.map(i => i.id === p.id ? { ...i, qty: i.qty + 1 } : i)
-      return [...c, { id: p.id, nome: p.nome, preco: p.preco, qty: 1, is_rosh: p.is_rosh }]
+      const ex = c.find(i => i.cartKey === cartKey)
+      if (ex) return c.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + 1 } : i)
+      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions, qty: 1, is_rosh: p.is_rosh, selectedOptions }]
     })
   }
 
-  function removeFromCart(id: number) {
-    setCart(c => c.flatMap(i => i.id === id ? (i.qty > 1 ? [{ ...i, qty: i.qty - 1 }] : []) : [i]))
+  function removeFromCart(cartKey: string) {
+    setCart(c => c.flatMap(i => i.cartKey === cartKey ? (i.qty > 1 ? [{ ...i, qty: i.qty - 1 }] : []) : [i]))
   }
 
   async function sendOrder() {
     if (!comanda || !mesa || cart.length === 0) return
     setSending(true)
-    const { data: pedido } = await supabase.from('pedidos').insert({
-      comanda_id: comanda.id,
-      mesa_id: mesa.id,
-      observacao: customerName || null,
-    }).select().single()
+    try {
+      const { data: pedido, error: pedErr } = await supabase.from('pedidos').insert({
+        comanda_id: comanda.id,
+        mesa_id: mesa.id,
+        observacao: customerName || null,
+      }).select().single()
+      if (pedErr || !pedido) { setSending(false); return }
 
-    const items = cart.map(i => ({
-      pedido_id: pedido!.id,
-      product_id: i.id,
-      nome_produto: i.nome,
-      preco_unitario: i.preco,
-      quantidade: i.qty,
-      is_rosh: i.is_rosh,
-      total_item: i.preco * i.qty,
-    }))
-    await supabase.from('pedido_itens').insert(items)
+      const items = cart.map(i => ({
+        pedido_id: pedido.id,
+        product_id: i.id,
+        nome_produto: i.nome,
+        preco_unitario: i.preco,
+        quantidade: i.qty,
+        is_rosh: i.is_rosh,
+        selected_options: i.selectedOptions.length > 0 ? i.selectedOptions : null,
+        price_additions: i.priceAdditions,
+        total_item: (i.preco + i.priceAdditions) * i.qty,
+      }))
+      await supabase.from('pedido_itens').insert(items)
 
-    // Update comanda total
-    const pedidoTotal = items.reduce((s, i) => s + i.total_item, 0)
-    const { data: currentComanda } = await supabase
-      .from('comandas').select('total').eq('id', comanda.id).single()
-    if (currentComanda) {
-      await supabase.from('comandas')
-        .update({ total: (currentComanda.total ?? 0) + pedidoTotal })
-        .eq('id', comanda.id)
+      const pedidoTotal = items.reduce((s, i) => s + i.total_item, 0)
+      await supabase.rpc('increment_comanda_total', { p_comanda_id: comanda.id, p_delta: pedidoTotal })
+
+      setCart([])
+      setSent(true)
+      setCartOpen(false)
+      setTimeout(() => setSent(false), 5000)
+    } finally {
+      setSending(false)
     }
-
-    setCart([])
-    setSending(false)
-    setSent(true)
-    setCartOpen(false)
-    setTimeout(() => setSent(false), 5000)
   }
 
   if (loading) return (
@@ -121,10 +174,23 @@ export default function QRMenuPage() {
 
   const filteredProds = selCat ? products.filter(p => p.categoria_id === selCat) : products
   const cartCount = cart.reduce((s, i) => s + i.qty, 0)
-  const cartTotal = cart.reduce((s, i) => s + i.preco * i.qty, 0)
+  const cartTotal = cart.reduce((s, i) => s + (i.preco + i.priceAdditions) * i.qty, 0)
 
   return (
     <div className="min-h-screen bg-ink text-white flex flex-col">
+      {pendingProduct && (
+        <OptionsModal
+          productNome={pendingProduct.nome}
+          productPreco={pendingProduct.preco}
+          groups={optionGroupsMap[pendingProduct.id] ?? []}
+          onConfirm={(selectedOptions, priceAdditions) => {
+            addDirect(pendingProduct, selectedOptions, priceAdditions)
+            setPendingProduct(null)
+          }}
+          onClose={() => setPendingProduct(null)}
+        />
+      )}
+
       {/* Header */}
       <div className="sticky top-0 z-40 bg-ink/95 backdrop-blur-sm border-b border-ink-border px-4 py-3 flex items-center justify-between">
         <div>
@@ -165,9 +231,11 @@ export default function QRMenuPage() {
       {/* Products grid */}
       <div className="flex-1 p-4 grid grid-cols-2 gap-3 pb-28">
         {filteredProds.map(p => {
-          const inCart = cart.find(i => i.id === p.id)
+          const inCart = cart.some(i => i.id === p.id)
+          const cartQty = cart.filter(i => i.id === p.id).reduce((s, i) => s + i.qty, 0)
+          const hasOptions = (optionGroupsMap[p.id]?.length ?? 0) > 0
           return (
-            <button key={p.id} onClick={() => addToCart(p)}
+            <button key={p.id} onClick={() => handleProductClick(p)}
               className={`flex flex-col p-4 rounded-2xl border text-left transition active:scale-95
                 ${inCart ? 'border-gold/40 bg-gold/5' : 'border-ink-border bg-ink-card hover:border-ink-border-2'}`}>
               <div className="flex items-start justify-between gap-1 mb-2">
@@ -175,9 +243,10 @@ export default function QRMenuPage() {
                 {p.is_rosh && <Wind size={10} className="text-gold shrink-0 mt-0.5" />}
               </div>
               <span className="text-gold font-bold text-sm">R$ {Number(p.preco).toFixed(2).replace('.', ',')}</span>
+              {hasOptions && <span className="text-[10px] text-[#555] mt-0.5">Personalizável</span>}
               {inCart && (
                 <span className="mt-2 text-[10px] font-bold bg-gold/10 text-gold border border-gold/20 px-2 py-0.5 rounded-full self-start">
-                  {inCart.qty}× no carrinho
+                  {cartQty}× no carrinho
                 </span>
               )}
             </button>
@@ -200,14 +269,21 @@ export default function QRMenuPage() {
             <div className="space-y-3 mt-4">
               {cart.length === 0 && <p className="text-[#444] text-sm text-center py-4">Carrinho vazio</p>}
               {cart.map(i => (
-                <div key={i.id} className="flex items-center gap-3">
-                  <div className="flex items-center bg-ink-raised border border-ink-border rounded-xl overflow-hidden">
-                    <button onClick={() => removeFromCart(i.id)} className="p-2.5 text-[#555] hover:text-white transition"><Minus size={13} /></button>
+                <div key={i.cartKey} className="flex items-start gap-3">
+                  <div className="flex items-center bg-ink-raised border border-ink-border rounded-xl overflow-hidden shrink-0">
+                    <button onClick={() => removeFromCart(i.cartKey)} className="p-2.5 text-[#555] hover:text-white transition"><Minus size={13} /></button>
                     <span className="text-sm font-bold w-6 text-center text-white">{i.qty}</span>
-                    <button onClick={() => addToCart({ ...i, stock_quantity: 99, categoria_id: 0 })} className="p-2.5 text-[#555] hover:text-white transition"><Plus size={13} /></button>
+                    <button onClick={() => addDirect({ id: i.id, nome: i.nome, preco: i.preco, stock_quantity: 99, categoria_id: 0, is_rosh: i.is_rosh }, i.selectedOptions, i.priceAdditions)} className="p-2.5 text-[#555] hover:text-white transition"><Plus size={13} /></button>
                   </div>
-                  <span className="flex-1 text-sm text-white">{i.nome}</span>
-                  <span className="text-sm font-bold text-gold">R$ {(i.preco * i.qty).toFixed(2).replace('.', ',')}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-white">{i.nome}</span>
+                    {i.selectedOptions.length > 0 && (
+                      <p className="text-[10px] text-[#555] mt-0.5 truncate">
+                        {i.selectedOptions.map(o => o.option_nome).join(', ')}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-sm font-bold text-gold shrink-0">R$ {((i.preco + i.priceAdditions) * i.qty).toFixed(2).replace('.', ',')}</span>
                 </div>
               ))}
             </div>
@@ -219,7 +295,7 @@ export default function QRMenuPage() {
                   <span className="font-display font-bold text-xl text-gold">R$ {cartTotal.toFixed(2).replace('.', ',')}</span>
                 </div>
                 <button onClick={sendOrder} disabled={sending} className="btn-primary w-full py-4 text-base">
-                  {sending ? <Spinner size={20} /> : <><Send size={17} /> Enviar Pedido</>}
+                  {sending ? <Spinner size={20} /> : <><Send size={17} /> Enviar · R$ {cartTotal.toFixed(2).replace('.', ',')}</>}
                 </button>
               </>
             )}

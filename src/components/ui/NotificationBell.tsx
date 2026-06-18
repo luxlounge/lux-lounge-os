@@ -42,14 +42,15 @@ export function NotificationBell() {
         .eq('status', 'aberta')
         .lte('aberta_em', fourHrsAgo),
       supabase.from('products')
-        .select('nome, stock_quantity')
+        .select('nome, stock_quantity, stock_minimo')
         .eq('active', true)
+        .gt('stock_minimo', 0)
         .lte('stock_quantity', 0),
       supabase.from('products')
-        .select('nome, stock_quantity')
+        .select('nome, stock_quantity, stock_minimo')
         .eq('active', true)
-        .gt('stock_quantity', 0)
-        .lt('stock_quantity', 3),
+        .gt('stock_minimo', 0)
+        .gt('stock_quantity', 0),
       supabase.from('pedidos')
         .select('id, created_at, status, comandas(mesas(numero))')
         .eq('status', 'pendente')
@@ -81,7 +82,7 @@ export function NotificationBell() {
       })
     }
 
-    for (const p of lowStock ?? []) {
+    for (const p of (lowStock ?? []).filter(p => p.stock_quantity <= (p as any).stock_minimo)) {
       next.push({
         key:        `estoque_baixo_${p.nome}`,
         tipo:       'estoque_baixo',
@@ -113,12 +114,22 @@ export function NotificationBell() {
     return () => clearInterval(interval)
   }, [loadAlerts])
 
-  // Realtime temporariamente desativado
-useEffect(() => {
-  return () => {
-    clearTimeout(rtDebounceRef.current)
-  }
-}, [loadAlerts])
+  // Realtime com debounce: evita 4 queries × N eventos em burst
+  useEffect(() => {
+    function debouncedLoad() {
+      clearTimeout(rtDebounceRef.current)
+      rtDebounceRef.current = setTimeout(loadAlerts, 350)
+    }
+    const sub = supabase.channel('notif-bell-rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' },  debouncedLoad)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas' }, debouncedLoad)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, debouncedLoad)
+      .subscribe()
+    return () => {
+      clearTimeout(rtDebounceRef.current)
+      sub.unsubscribe()
+    }
+  }, [loadAlerts])
 
   // Close on click outside
   useEffect(() => {
