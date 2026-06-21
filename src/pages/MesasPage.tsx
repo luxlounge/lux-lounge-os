@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { sendWhatsAppWelcome } from '../lib/whatsapp'
 import type { Mesa, Comanda, Pedido, Pagamento, Cliente } from '../types'
 import { Spinner } from '../components/ui/Spinner'
 import { SkeletonMesa } from '../components/ui/Skeleton'
@@ -188,6 +189,15 @@ export default function MesasPage() {
     setCheckinOpen(false)
     setSelected(null)
     toast(`Mesa ${checkinMesa.numero} aberta — ${nomeClean}`)
+    if (wppClean) {
+      sendWhatsAppWelcome({
+        phone: wppClean,
+        mesaNumero: checkinMesa.numero,
+        mesaId: checkinMesa.id,
+        comandaId: comanda.id,
+        clienteNome: nomeClean,
+      }).catch(err => console.error('WhatsApp send:', err))
+    }
     navigate(`/comanda/${comanda.id}`)
   }
 
