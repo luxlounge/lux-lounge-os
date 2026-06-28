@@ -21,7 +21,8 @@ const CaixaPage    = lazy(() => import('./pages/CaixaPage'))
 const QRMenuPage   = lazy(() => import('./pages/qr/QRMenuPage'))
 const GuidePage     = lazy(() => import('./pages/GuidePage'))
 const ProducaoPage  = lazy(() => import('./pages/ProducaoPage'))
-const CrmPage       = lazy(() => import('./pages/CrmPage'))
+const CrmPage          = lazy(() => import('./pages/CrmPage'))
+
 
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
   state = { error: null }
@@ -72,6 +73,7 @@ export default function App() {
         <BrowserRouter>
           <Suspense fallback={<Loading />}>
             <Routes>
+              <Route path="/q/:sessionToken" element={<QRMenuPage />} />
               <Route path="/m/:mesaNumber" element={<QRMenuPage />} />
               <Route path="/login" element={
                 authState.session ? <Navigate to="/" replace /> : <LoginPage />
@@ -91,7 +93,8 @@ export default function App() {
                       <Route path="/config"   element={<ConfigPage />} />
                       <Route path="/guia"      element={<GuidePage />} />
                       <Route path="/producao"  element={<ProducaoPage />} />
-                      <Route path="/crm"       element={<CrmPage />} />
+                      <Route path="/crm"           element={<CrmPage />} />
+                      
                     </Routes>
                   </Layout>
                 </PrivateRoute>

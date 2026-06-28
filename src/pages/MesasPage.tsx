@@ -7,9 +7,14 @@ import { Spinner } from '../components/ui/Spinner'
 import { SkeletonMesa } from '../components/ui/Skeleton'
 import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../components/ui/Toast'
-import { X, ChevronRight, Users, CheckCircle, Wrench, Unlock, CreditCard, DollarSign, Smartphone, Gift, Phone, UserCheck, UserPlus } from 'lucide-react'
+import {
+  X, ChevronRight, Users, CheckCircle, Wrench, Unlock,
+  CreditCard, DollarSign, Smartphone, Gift, Phone,
+  UserCheck, UserPlus, Copy, Link2,
+} from 'lucide-react'
 import { PageHelp } from '../components/ui/PageHelp'
 import { format } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 
 function timeAgo(iso: string) {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
@@ -24,6 +29,30 @@ function fmt(n: number) {
   return `R$ ${Number(n).toFixed(2).replace('.', ',')}`
 }
 
+function generateSessionToken(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+}
+
+function buildSessionUrl(sessionToken: string): string {
+  return `${window.location.origin}/q/${sessionToken}`
+}
+
+function buildWaLink(nome: string, phone: string, link: string): string {
+  const msg =
+    `Olá, ${nome} 👋\n\n` +
+    `Seja bem-vindo à Lux Lounge.\n\n` +
+    `Sua mesa já está ativa.\n\n` +
+    `Através deste link você poderá:\n\n` +
+    `🍹 Fazer pedidos\n` +
+    `🔥 Solicitar troca de rosh\n` +
+    `🔔 Chamar atendimento\n` +
+    `💳 Solicitar sua conta\n` +
+    `📦 Acompanhar pedidos em tempo real\n\n` +
+    `Acesse:\n\n${link}\n\nTenha uma ótima experiência.`
+  return `https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`
+}
+
 const PAY_METHODS = [
   { key: 'dinheiro', label: 'Dinheiro', icon: DollarSign },
   { key: 'pix',      label: 'Pix',      icon: Smartphone },
@@ -36,6 +65,15 @@ const METHOD_LABEL: Record<string, string> = { dinheiro: 'Dinheiro', pix: 'Pix',
 
 interface MesaComComanda extends Mesa {
   comanda?: Comanda
+}
+
+interface PostOpenState {
+  link: string
+  sessionToken: string
+  phone: string
+  nome: string
+  comandaId: number
+  mesaNumero: number
 }
 
 export default function MesasPage() {
@@ -66,10 +104,16 @@ export default function MesasPage() {
   const [clienteLookup, setClienteLookup] = useState<{ found: boolean; cliente?: Cliente } | null>(null)
   const [lookingUp, setLookingUp] = useState(false)
 
+  // Post-open modal
+  const [postOpen, setPostOpen] = useState<PostOpenState | null>(null)
+  const [copied, setCopied] = useState(false)
+
   const load = useCallback(async () => {
     const [{ data: ms }, { data: cs }] = await Promise.all([
       supabase.from('mesas').select('*').order('numero'),
-      supabase.from('comandas').select('*, clientes(id, nome, whatsapp)').eq('status', 'aberta'),
+      supabase.from('comandas')
+        .select('*, clientes(id, nome, whatsapp, total_visits, last_visit, is_vip_manual), session_token')
+        .eq('status', 'aberta'),
     ])
     const comandaMap: Record<number, Comanda> = {}
     for (const c of cs ?? []) comandaMap[c.mesa_id] = c
@@ -132,32 +176,28 @@ export default function MesasPage() {
   async function confirmOpen() {
     if (!checkinMesa) return
     const nomeClean = checkinForm.nome.trim()
-    const wppClean = checkinForm.whatsapp.replace(/\D/g, '')
-    if (!nomeClean || !wppClean) {
-      toastError('Nome e WhatsApp são obrigatórios.')
+    if (!nomeClean) {
+      toastError('Nome é obrigatório.')
       return
     }
+    const wppClean = checkinForm.whatsapp.replace(/\D/g, '')
     setOpening(true)
 
-    // — Upsert cliente —
-    let clienteId: number
-    if (clienteLookup?.found && clienteLookup.cliente) {
-      clienteId = clienteLookup.cliente.id
-      await supabase.from('clientes').update({ nome: nomeClean }).eq('id', clienteId)
-      await supabase.rpc('fn_checkin_cliente', { p_cliente_id: clienteId })
-    } else {
-      const { data: newCli, error: cliErr } = await supabase
-        .from('clientes')
-        .insert({ nome: nomeClean, whatsapp: wppClean, last_visit: new Date().toISOString(), total_visits: 1 })
-        .select('id')
-        .single()
-      if (cliErr || !newCli) {
+    // — Upsert cliente atômico (ON CONFLICT — sem race condition nem duplicatas) —
+    let clienteId: number | null = null
+    if (wppClean.length >= 10) {
+      const { data: cliId, error: cliErr } = await supabase
+        .rpc('fn_upsert_cliente', { p_nome: nomeClean, p_whatsapp: wppClean })
+      if (cliErr || !cliId) {
         setOpening(false)
         toastError(cliErr?.message ?? 'Erro ao cadastrar cliente.')
         return
       }
-      clienteId = newCli.id
+      clienteId = cliId as number
     }
+
+    // — Gerar session token único —
+    const sessionToken = generateSessionToken()
 
     // — Criar comanda —
     const { data: comanda, error: comandaErr } = await supabase
@@ -169,6 +209,7 @@ export default function MesasPage() {
         cliente_id: clienteId,
         pessoas: parseInt(checkinForm.pessoas) || null,
         observacao: checkinForm.obs.trim() || null,
+        session_token: sessionToken,
       })
       .select()
       .single()
@@ -185,10 +226,14 @@ export default function MesasPage() {
       navigate(`/comanda/${comanda.id}`)
       return
     }
+
     setOpening(false)
     setCheckinOpen(false)
     setSelected(null)
-    toast(`Mesa ${checkinMesa.numero} aberta — ${nomeClean}`)
+
+    const sessionLink = buildSessionUrl(sessionToken)
+
+    // Send via API (fire-and-forget) if phone + config
     if (wppClean) {
       sendWhatsAppWelcome({
         phone: wppClean,
@@ -196,9 +241,19 @@ export default function MesasPage() {
         mesaId: checkinMesa.id,
         comandaId: comanda.id,
         clienteNome: nomeClean,
-      }).catch(err => console.error('WhatsApp send:', err))
+        sessionToken,
+      }).catch(err => console.error('WhatsApp API send:', err))
     }
-    navigate(`/comanda/${comanda.id}`)
+
+    // Show post-open modal
+    setPostOpen({
+      link: sessionLink,
+      sessionToken,
+      phone: wppClean,
+      nome: nomeClean,
+      comandaId: comanda.id,
+      mesaNumero: checkinMesa.numero,
+    })
   }
 
   async function changeStatus(status: Mesa['status']) {
@@ -222,7 +277,6 @@ export default function MesasPage() {
       valor,
       registrado_por: profile?.id,
     })
-    // Refresh comanda total_pago
     const { data: pags } = await supabase.from('pagamentos').select('valor').eq('comanda_id', selected.comanda.id)
     const totalPago = (pags ?? []).reduce((s: number, p: any) => s + p.valor, 0)
     await supabase.from('comandas').update({ total_pago: totalPago }).eq('id', selected.comanda.id)
@@ -230,13 +284,20 @@ export default function MesasPage() {
     setSavingPay(false)
     toast(`${fmt(valor)} registrado via ${METHOD_LABEL[quickPayMethod]}`)
     load()
-    // Refresh detail
     const [{ data: peds }, { data: pgsNew }] = await Promise.all([
       supabase.from('pedidos').select('*, pedido_itens(*)').eq('comanda_id', selected.comanda.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('pagamentos').select('*').eq('comanda_id', selected.comanda.id).order('created_at', { ascending: false }),
     ])
     setDetailPedidos(peds ?? [])
     setDetailPagamentos(pgsNew ?? [])
+  }
+
+  function copyLink(link: string) {
+    navigator.clipboard.writeText(link).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+      toast('Link copiado!')
+    })
   }
 
   const filtered = mesas.filter(m => {
@@ -382,17 +443,55 @@ export default function MesasPage() {
                       {selected.comanda.pessoas ? ` · ${selected.comanda.pessoas} pessoa(s)` : ''}
                     </p>
                     {(selected.comanda as any).clientes && (
-                      <p className="text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
-                        <UserCheck size={10} style={{ color: 'var(--green)' }} />
-                        {(selected.comanda as any).clientes.nome}
-                        <span style={{ color: 'var(--border-strong)' }}>·</span>
-                        {(selected.comanda as any).clientes.whatsapp}
-                      </p>
+                      <div className="text-xs space-y-0.5">
+                        <p className="flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                          <UserCheck size={10} style={{ color: 'var(--green)' }} />
+                          {(selected.comanda as any).clientes.nome}
+                          {(selected.comanda as any).clientes.whatsapp && (
+                            <><span style={{ color: 'var(--border-strong)' }}>·</span>
+                            {(selected.comanda as any).clientes.whatsapp}</>
+                          )}
+                        </p>
+                        <p className="flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
+                          <span>{(selected.comanda as any).clientes.total_visits}ª visita</span>
+                          {(selected.comanda as any).clientes.last_visit && (
+                            <span>· última: {format(new Date((selected.comanda as any).clientes.last_visit), "dd/MM/yy", { locale: ptBR })}</span>
+                          )}
+                          {(selected.comanda as any).clientes.is_vip_manual && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                              style={{ background: 'var(--gold-bg)', color: 'var(--gold)', border: '1px solid var(--gold-border)' }}>
+                              VIP
+                            </span>
+                          )}
+                          {(selected.comanda as any).clientes.total_visits === 1 && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                              style={{ background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)' }}>
+                              Novo
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     )}
                     {selected.comanda.observacao && (
                       <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
                         {selected.comanda.observacao}
                       </p>
+                    )}
+                    {/* Session link */}
+                    {selected.comanda.session_token && (
+                      <div className="flex items-center gap-2 mt-1 px-2.5 py-1.5 rounded-lg"
+                        style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-subtle)' }}>
+                        <Link2 size={10} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+                        <span className="text-[10px] font-mono flex-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                          /q/{selected.comanda.session_token}
+                        </span>
+                        <button
+                          onClick={e => { e.stopPropagation(); copyLink(buildSessionUrl(selected.comanda!.session_token!)) }}
+                          className="shrink-0 p-0.5 rounded transition"
+                          style={{ color: 'var(--text-muted)' }}>
+                          <Copy size={10} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -533,7 +632,6 @@ export default function MesasPage() {
             )}
 
             <div className="space-y-2">
-              {/* Primary actions */}
               {selected.status === 'ocupada' && selected.comanda && (
                 <button onClick={() => navigate(`/comanda/${selected.comanda!.id}`)}
                   className="btn-primary w-full py-3.5 text-sm">
@@ -561,7 +659,6 @@ export default function MesasPage() {
                 </div>
               )}
 
-              {/* Status controls — admin/caixa only */}
               {canManage && selected.status !== 'ocupada' && (
                 <div className="pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                   <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
@@ -618,10 +715,10 @@ export default function MesasPage() {
             </div>
 
             <div className="space-y-4">
-              {/* WhatsApp — primeiro campo, dispara lookup */}
+              {/* WhatsApp — dispara lookup */}
               <div>
                 <label className="label">
-                  WhatsApp <span style={{ color: 'var(--red)' }}>*</span>
+                  WhatsApp <span style={{ color: 'var(--text-muted)' }}>(opcional)</span>
                 </label>
                 <div className="relative">
                   <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
@@ -639,18 +736,40 @@ export default function MesasPage() {
                   )}
                 </div>
 
-                {/* Lookup status */}
                 {clienteLookup && !lookingUp && (
-                  <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold"
+                  <div className="mt-2 flex flex-col gap-1 px-3 py-2 rounded-xl"
                     style={{
                       background: clienteLookup.found ? 'var(--green-bg)' : 'var(--blue-bg)',
                       border: `1px solid ${clienteLookup.found ? 'var(--green-border)' : 'var(--blue-border)'}`,
-                      color: clienteLookup.found ? 'var(--green)' : 'var(--blue)',
                     }}>
-                    {clienteLookup.found
-                      ? <><UserCheck size={12} /> Cliente encontrado — {clienteLookup.cliente?.total_visits} visita(s) · {clienteLookup.cliente?.nome}</>
-                      : <><UserPlus size={12} /> Novo cliente — será cadastrado automaticamente</>
-                    }
+                    <div className="flex items-center gap-2 text-xs font-semibold"
+                      style={{ color: clienteLookup.found ? 'var(--green)' : 'var(--blue)' }}>
+                      {clienteLookup.found
+                        ? <><UserCheck size={12} /> Cliente encontrado — {clienteLookup.cliente?.nome}</>
+                        : <><UserPlus size={12} /> Novo cliente — será cadastrado</>
+                      }
+                    </div>
+                    {clienteLookup.found && clienteLookup.cliente && (
+                      <div className="flex items-center gap-2 text-[10px]"
+                        style={{ color: 'var(--green)' }}>
+                        <span>{clienteLookup.cliente.total_visits} visita(s)</span>
+                        {clienteLookup.cliente.last_visit && (
+                          <span>· última: {format(new Date(clienteLookup.cliente.last_visit), "dd/MM/yy", { locale: ptBR })}</span>
+                        )}
+                        {clienteLookup.cliente.is_vip_manual && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                            style={{ background: 'rgba(212,175,55,0.15)', color: 'var(--gold)', border: '1px solid rgba(212,175,55,0.3)' }}>
+                            VIP
+                          </span>
+                        )}
+                        {clienteLookup.cliente.total_visits === 1 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                            style={{ background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)' }}>
+                            Novo
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -695,9 +814,76 @@ export default function MesasPage() {
 
               <button
                 onClick={confirmOpen}
-                disabled={opening || !checkinForm.nome.trim() || checkinForm.whatsapp.replace(/\D/g,'').length < 10}
+                disabled={opening || !checkinForm.nome.trim()}
                 className="btn-primary w-full py-3.5 text-sm">
                 {opening ? <Spinner size={18} /> : <><Users size={16} /> Confirmar Abertura</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post-open modal */}
+      {postOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-4">
+          <div className="absolute inset-0"
+            style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)' }} />
+          <div className="relative w-full max-w-sm rounded-2xl p-6 space-y-5 animate-slide-up"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+
+            {/* Success header */}
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center"
+                style={{ background: 'var(--green-bg)', border: '1px solid var(--green-border)' }}>
+                <CheckCircle size={24} style={{ color: 'var(--green)' }} />
+              </div>
+              <h2 className="font-bold text-xl" style={{ color: 'var(--text-primary)' }}>
+                Mesa {String(postOpen.mesaNumero).padStart(2, '0')} aberta!
+              </h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                {postOpen.nome}
+              </p>
+            </div>
+
+            {/* Session link */}
+            <div className="rounded-xl p-4 space-y-1"
+              style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
+              <p className="text-[10px] uppercase tracking-wider flex items-center gap-1.5"
+                style={{ color: 'var(--text-muted)' }}>
+                <Link2 size={10} /> Link da sessão
+              </p>
+              <p className="text-xs font-mono break-all leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+                {postOpen.link}
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="space-y-2">
+              {postOpen.phone && (
+                <a
+                  href={buildWaLink(postOpen.nome, postOpen.phone, postOpen.link)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary w-full py-3.5 flex items-center justify-center gap-2 text-sm"
+                  style={{ textDecoration: 'none' }}>
+                  <Smartphone size={16} /> 📲 Enviar WhatsApp
+                </a>
+              )}
+              <button
+                onClick={() => copyLink(postOpen.link)}
+                className="w-full py-3.5 text-sm flex items-center justify-center gap-2 rounded-xl font-semibold transition"
+                style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
+                <Copy size={14} /> {copied ? '✓ Copiado!' : '📋 Copiar Link'}
+              </button>
+              <button
+                onClick={() => {
+                  const id = postOpen.comandaId
+                  setPostOpen(null)
+                  navigate(`/comanda/${id}`)
+                }}
+                className="w-full py-3.5 text-sm flex items-center justify-center gap-2 rounded-xl font-semibold transition"
+                style={{ background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
+                ✅ Continuar
               </button>
             </div>
           </div>

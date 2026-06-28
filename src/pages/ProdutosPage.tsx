@@ -1,14 +1,42 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Product, Categoria, RecipeItem, StockPurchase, ProductOptionGroup, ProductOption } from '../types'
+import type { Product, Categoria, RecipeItem, StockPurchase, ProductOptionGroup, ProductOption, ProductType } from '../types'
 import { Modal } from '../components/ui/Modal'
 import { PageHelp } from '../components/ui/PageHelp'
 import { Spinner } from '../components/ui/Spinner'
 import { useToast } from '../components/ui/Toast'
 import {
   Plus, Edit2, Search, Wind, ShoppingBag, Upload, X, BookOpen,
-  Trash2, DollarSign, ShoppingCart, Calendar, SlidersHorizontal,
+  Trash2, DollarSign, ShoppingCart, Calendar, SlidersHorizontal, Layers,
 } from 'lucide-react'
+
+// Local types for composite builder modal
+interface CmpItem {
+  id: number
+  component_product_id: number
+  quantity: number
+  component: { id: number; nome: string } | null
+}
+interface CmpPersonOption {
+  id: number
+  personalization_id: number
+  component_product_id: number
+  price_delta: number
+  is_default: boolean
+  component: { id: number; nome: string } | null
+}
+interface CmpPerson {
+  id: number
+  nome: string
+  quantidade: number
+  options?: CmpPersonOption[]
+}
+interface CmpAddon {
+  id: number
+  component_product_id: number
+  price_delta: number
+  component: { id: number; nome: string } | null
+}
 
 const UNIT_LABELS: Record<string, string> = {
   unit: 'Unidade', ml: 'mL', g: 'Gramas', kg: 'Kg', litro: 'Litro',
@@ -36,6 +64,7 @@ export default function ProdutosPage() {
     nome: '', categoria_id: '', preco: '', stock_quantity: '', cost_price: '0',
     unit_type: 'unit', package_quantity: '1',
     active: true, is_rosh: false, carvao_por_rosh: '2', exibe_cardapio: true,
+    product_type: 'simples' as ProductType,
   })
   const [saving, setSaving] = useState(false)
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -58,6 +87,24 @@ export default function ProdutosPage() {
   const [purchasesLoading, setPurchasesLoading] = useState(false)
   const [purchaseForm, setPurchaseForm] = useState({ quantity: '', unit_cost: '', supplier: '', purchased_at: new Date().toISOString().slice(0, 10) })
   const [savingPurchase, setSavingPurchase] = useState(false)
+
+  // Composite builder modal
+  const [compositeOpen, setCompositeOpen] = useState(false)
+  const [compositeProduct, setCompositeProduct] = useState<Product | null>(null)
+  const [cmpItems, setCmpItems] = useState<CmpItem[]>([])
+  const [cmpPersons, setCmpPersons] = useState<CmpPerson[]>([])
+  const [cmpAddons, setCmpAddons] = useState<CmpAddon[]>([])
+  const [compositeLoading, setCompositeLoading] = useState(false)
+  const [cmpTab, setCmpTab] = useState<'inclusos' | 'personalizacoes' | 'adicionais'>('inclusos')
+  const [newCmpItem, setNewCmpItem] = useState({ product_id: '', quantity: '1' })
+  const [savingCmpItem, setSavingCmpItem] = useState(false)
+  const [newPersonNome, setNewPersonNome] = useState('')
+  const [newPersonQty, setNewPersonQty] = useState('1')
+  const [savingPerson, setSavingPerson] = useState(false)
+  const [newPersonOpts, setNewPersonOpts] = useState<Record<number, { product_id: string; price_delta: string; is_default: boolean }>>({})
+  const [savingPersonOpt, setSavingPersonOpt] = useState<number | null>(null)
+  const [newAddon, setNewAddon] = useState({ product_id: '', price_delta: '0' })
+  const [savingAddon, setSavingAddon] = useState(false)
 
   // Options modal
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -87,6 +134,7 @@ export default function ProdutosPage() {
       nome: '', categoria_id: categories[0]?.id?.toString() ?? '', preco: '', stock_quantity: '0',
       cost_price: '0', unit_type: 'unit', package_quantity: '1',
       active: true, is_rosh: false, carvao_por_rosh: '2', exibe_cardapio: true,
+      product_type: 'simples',
     })
     setImageFile(null)
     setImagePreview(null)
@@ -100,7 +148,7 @@ export default function ProdutosPage() {
       stock_quantity: String(p.stock_quantity), cost_price: String(p.cost_price ?? 0),
       unit_type: p.unit_type ?? 'unit', package_quantity: String(p.package_quantity ?? 1),
       active: p.active, is_rosh: p.is_rosh, carvao_por_rosh: String(p.carvao_por_rosh),
-      exibe_cardapio: p.exibe_cardapio,
+      exibe_cardapio: p.exibe_cardapio, product_type: (p.product_type ?? 'simples') as ProductType,
     })
     setImageFile(null)
     setImagePreview(p.imagem_url ?? null)
@@ -146,6 +194,7 @@ export default function ProdutosPage() {
       is_rosh: form.is_rosh,
       carvao_por_rosh: parseInt(form.carvao_por_rosh),
       exibe_cardapio: form.exibe_cardapio,
+      product_type: form.product_type,
     }
 
     let productId: number
@@ -366,6 +415,122 @@ export default function ProdutosPage() {
       : g))
   }
 
+  // — Composite builder modal —
+  async function openComposite(p: Product) {
+    setCompositeProduct(p)
+    setCompositeLoading(true)
+    setCompositeOpen(true)
+    setCmpTab('inclusos')
+    const [{ data: items }, { data: persons }, { data: addons }] = await Promise.all([
+      supabase.from('composite_items')
+        .select('*, component:component_product_id(id, nome)')
+        .eq('product_id', p.id).order('ordem'),
+      supabase.from('composite_personalizations')
+        .select('*, options:composite_personalization_options(*, component:component_product_id(id, nome))')
+        .eq('product_id', p.id).order('ordem'),
+      supabase.from('composite_addons')
+        .select('*, component:component_product_id(id, nome)')
+        .eq('product_id', p.id).order('ordem'),
+    ])
+    setCmpItems((items ?? []) as CmpItem[])
+    setCmpPersons((persons ?? []) as CmpPerson[])
+    setCmpAddons((addons ?? []) as CmpAddon[])
+    setCompositeLoading(false)
+  }
+
+  async function addCmpItem() {
+    if (!compositeProduct || !newCmpItem.product_id) return
+    setSavingCmpItem(true)
+    const { data } = await supabase.from('composite_items').insert({
+      product_id: compositeProduct.id,
+      component_product_id: parseInt(newCmpItem.product_id),
+      quantity: parseFloat(newCmpItem.quantity.replace(',', '.')) || 1,
+      ordem: cmpItems.length,
+    }).select('*, component:component_product_id(id, nome)').single()
+    setSavingCmpItem(false)
+    if (data) {
+      setCmpItems(arr => [...arr, data as CmpItem])
+      setNewCmpItem({ product_id: '', quantity: '1' })
+    }
+  }
+
+  async function removeCmpItem(id: number) {
+    await supabase.from('composite_items').delete().eq('id', id)
+    setCmpItems(arr => arr.filter(i => i.id !== id))
+  }
+
+  async function addPerson() {
+    if (!compositeProduct || !newPersonNome.trim()) return
+    setSavingPerson(true)
+    const { data } = await supabase.from('composite_personalizations').insert({
+      product_id: compositeProduct.id,
+      nome: newPersonNome.trim(),
+      quantidade: parseInt(newPersonQty) || 1,
+      ordem: cmpPersons.length,
+    }).select().single()
+    setSavingPerson(false)
+    if (data) {
+      setCmpPersons(arr => [...arr, { ...(data as CmpPerson), options: [] }])
+      setNewPersonOpts(f => ({ ...f, [(data as CmpPerson).id]: { product_id: '', price_delta: '0', is_default: false } }))
+      setNewPersonNome('')
+      setNewPersonQty('1')
+    }
+  }
+
+  async function removePerson(id: number) {
+    await supabase.from('composite_personalizations').delete().eq('id', id)
+    setCmpPersons(arr => arr.filter(p => p.id !== id))
+    setNewPersonOpts(f => { const n = { ...f }; delete n[id]; return n })
+  }
+
+  async function addPersonOpt(personId: number) {
+    const f = newPersonOpts[personId]
+    if (!f?.product_id) return
+    setSavingPersonOpt(personId)
+    const { data } = await supabase.from('composite_personalization_options').insert({
+      personalization_id: personId,
+      component_product_id: parseInt(f.product_id),
+      price_delta: parseFloat(f.price_delta.replace(',', '.')) || 0,
+      is_default: f.is_default,
+      ordem: (cmpPersons.find(p => p.id === personId)?.options?.length ?? 0),
+    }).select('*, component:component_product_id(id, nome)').single()
+    setSavingPersonOpt(null)
+    if (data) {
+      setCmpPersons(arr => arr.map(p => p.id === personId
+        ? { ...p, options: [...(p.options ?? []), data as CmpPersonOption] }
+        : p))
+      setNewPersonOpts(f2 => ({ ...f2, [personId]: { product_id: '', price_delta: '0', is_default: false } }))
+    }
+  }
+
+  async function removePersonOpt(personId: number, optId: number) {
+    await supabase.from('composite_personalization_options').delete().eq('id', optId)
+    setCmpPersons(arr => arr.map(p => p.id === personId
+      ? { ...p, options: (p.options ?? []).filter(o => o.id !== optId) }
+      : p))
+  }
+
+  async function addCmpAddon() {
+    if (!compositeProduct || !newAddon.product_id) return
+    setSavingAddon(true)
+    const { data } = await supabase.from('composite_addons').insert({
+      product_id: compositeProduct.id,
+      component_product_id: parseInt(newAddon.product_id),
+      price_delta: parseFloat(newAddon.price_delta.replace(',', '.')) || 0,
+      ordem: cmpAddons.length,
+    }).select('*, component:component_product_id(id, nome)').single()
+    setSavingAddon(false)
+    if (data) {
+      setCmpAddons(arr => [...arr, data as CmpAddon])
+      setNewAddon({ product_id: '', price_delta: '0' })
+    }
+  }
+
+  async function removeCmpAddon(id: number) {
+    await supabase.from('composite_addons').delete().eq('id', id)
+    setCmpAddons(arr => arr.filter(a => a.id !== id))
+  }
+
   const filtered = products.filter(p => {
     const matchSearch = p.nome.toLowerCase().includes(search.toLowerCase())
     const matchCat = selCat === null || p.categoria_id === selCat
@@ -530,6 +695,13 @@ export default function ProdutosPage() {
                     style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
                     <SlidersHorizontal size={10} /> Opções
                   </button>
+                  {p.product_type === 'composto' && (
+                    <button onClick={() => openComposite(p)}
+                      className="col-span-2 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[11px] font-semibold transition"
+                      style={{ background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', color: 'var(--gold)' }}>
+                      <Layers size={10} /> Montagem
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -601,6 +773,29 @@ export default function ProdutosPage() {
             </div>
             {form.is_rosh && (
               <div><label className="label">Carvão por Rosh</label><input type="number" className="input" value={form.carvao_por_rosh} onChange={e => setForm(f => ({ ...f, carvao_por_rosh: e.target.value }))} /></div>
+            )}
+          </div>
+
+          {/* Product type */}
+          <div>
+            <label className="label">Tipo de Produto</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['simples', 'composto'] as ProductType[]).map(t => (
+                <button key={t} type="button" onClick={() => setForm(f => ({ ...f, product_type: t }))}
+                  className="py-2 rounded-xl text-sm font-semibold transition capitalize"
+                  style={{
+                    background: form.product_type === t ? 'var(--gold-bg)' : 'var(--bg-raised)',
+                    border: `1px solid ${form.product_type === t ? 'var(--gold-border)' : 'var(--border-default)'}`,
+                    color: form.product_type === t ? 'var(--gold)' : 'var(--text-secondary)',
+                  }}>
+                  {t === 'simples' ? 'Simples' : 'Composto (Kit)'}
+                </button>
+              ))}
+            </div>
+            {form.product_type === 'composto' && (
+              <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                Produto composto agrupado em kit. Configure a montagem após salvar.
+              </p>
             )}
           </div>
 
@@ -823,6 +1018,200 @@ export default function ProdutosPage() {
               <button onClick={saveCostFromRecipe} className="btn-primary w-full py-3.5">
                 <DollarSign size={15} /> Salvar custo calculado no produto
               </button>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Composite Builder Modal */}
+      <Modal open={compositeOpen} onClose={() => setCompositeOpen(false)} title={`Montagem — ${compositeProduct?.nome ?? ''}`} size="lg">
+        {compositeLoading ? (
+          <div className="flex justify-center py-10"><Spinner /></div>
+        ) : (
+          <div className="space-y-4">
+            {/* Tabs */}
+            <div className="flex gap-1">
+              {([
+                { key: 'inclusos', label: `Inclusos (${cmpItems.length})` },
+                { key: 'personalizacoes', label: `Personalizações (${cmpPersons.length})` },
+                { key: 'adicionais', label: `Adicionais (${cmpAddons.length})` },
+              ] as { key: 'inclusos' | 'personalizacoes' | 'adicionais'; label: string }[]).map(({ key, label }) => (
+                <button key={key} onClick={() => setCmpTab(key)}
+                  className="flex-1 py-1.5 rounded-lg text-xs font-semibold transition"
+                  style={{
+                    background: cmpTab === key ? 'var(--gold)' : 'var(--bg-raised)',
+                    color: cmpTab === key ? 'var(--bg-base)' : 'var(--text-muted)',
+                    border: cmpTab === key ? 'none' : '1px solid var(--border-default)',
+                  }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab: Inclusos */}
+            {cmpTab === 'inclusos' && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  {cmpItems.length === 0 && (
+                    <p className="text-sm text-center py-3" style={{ color: 'var(--text-muted)' }}>Nenhum item incluso ainda.</p>
+                  )}
+                  {cmpItems.map(item => (
+                    <div key={item.id} className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                      style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-subtle)' }}>
+                      <span className="font-mono text-xs font-bold" style={{ color: 'var(--gold)' }}>{item.quantity}×</span>
+                      <span className="flex-1 text-sm" style={{ color: 'var(--text-primary)' }}>{item.component?.nome ?? '—'}</span>
+                      <button onClick={() => removeCmpItem(item.id)}
+                        className="w-6 h-6 flex items-center justify-center rounded-lg"
+                        style={{ color: 'var(--red)', border: '1px solid var(--border-default)', background: 'var(--bg-base)' }}>
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-xl p-3 space-y-2" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Adicionar Item Incluso</p>
+                  <div className="flex gap-2">
+                    <select className="input text-sm flex-1" value={newCmpItem.product_id}
+                      onChange={e => setNewCmpItem(f => ({ ...f, product_id: e.target.value }))}>
+                      <option value="">Selecione produto</option>
+                      {products.filter(p => p.id !== compositeProduct?.id).map(p => (
+                        <option key={p.id} value={p.id}>{p.nome}</option>
+                      ))}
+                    </select>
+                    <input className="input text-sm w-20" placeholder="Qtd" value={newCmpItem.quantity}
+                      onChange={e => setNewCmpItem(f => ({ ...f, quantity: e.target.value }))} />
+                  </div>
+                  <button onClick={addCmpItem} disabled={!newCmpItem.product_id || savingCmpItem}
+                    className="btn-secondary w-full py-2 text-sm">
+                    {savingCmpItem ? <Spinner size={14} /> : <><Plus size={13} /> Adicionar</>}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Personalizações */}
+            {cmpTab === 'personalizacoes' && (
+              <div className="space-y-3">
+                {cmpPersons.map(person => (
+                  <div key={person.id} className="rounded-xl p-3 space-y-2"
+                    style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{person.nome}</span>
+                        <span className="ml-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>· {person.quantidade}×</span>
+                      </div>
+                      <button onClick={() => removePerson(person.id)}
+                        className="w-6 h-6 flex items-center justify-center rounded-lg"
+                        style={{ color: 'var(--red)', border: '1px solid var(--border-default)', background: 'var(--bg-base)' }}>
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      {(person.options ?? []).map(opt => (
+                        <div key={opt.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg"
+                          style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+                          <span className="flex-1 text-xs" style={{ color: 'var(--text-primary)' }}>{opt.component?.nome ?? '—'}</span>
+                          <span className="text-xs font-mono" style={{ color: opt.price_delta > 0 ? 'var(--gold)' : 'var(--text-muted)' }}>
+                            {opt.price_delta > 0 ? `+R$ ${Number(opt.price_delta).toFixed(2).replace('.', ',')}` : 'grátis'}
+                          </span>
+                          {opt.is_default && <span className="text-[9px] px-1 rounded" style={{ background: 'var(--gold-bg)', color: 'var(--gold)' }}>padrão</span>}
+                          <button onClick={() => removePersonOpt(person.id, opt.id)}
+                            className="w-5 h-5 flex items-center justify-center rounded"
+                            style={{ color: 'var(--red)' }}>
+                            <X size={10} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Add option form */}
+                    {newPersonOpts[person.id] !== undefined && (
+                      <div className="flex gap-1 pt-1 flex-wrap">
+                        <select className="input text-xs flex-1 min-w-0"
+                          value={newPersonOpts[person.id]?.product_id ?? ''}
+                          onChange={e => setNewPersonOpts(f => ({ ...f, [person.id]: { ...f[person.id], product_id: e.target.value } }))}>
+                          <option value="">Produto...</option>
+                          {products.filter(p => p.id !== compositeProduct?.id).map(p => (
+                            <option key={p.id} value={p.id}>{p.nome}</option>
+                          ))}
+                        </select>
+                        <input className="input text-xs w-20" placeholder="+R$ 0"
+                          value={newPersonOpts[person.id]?.price_delta ?? '0'}
+                          onChange={e => setNewPersonOpts(f => ({ ...f, [person.id]: { ...f[person.id], price_delta: e.target.value } }))} />
+                        <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                          <input type="checkbox" checked={newPersonOpts[person.id]?.is_default ?? false}
+                            onChange={e => setNewPersonOpts(f => ({ ...f, [person.id]: { ...f[person.id], is_default: e.target.checked } }))}
+                            className="w-3 h-3" style={{ accentColor: 'var(--gold)' }} />
+                          padrão
+                        </label>
+                        <button onClick={() => addPersonOpt(person.id)}
+                          disabled={!newPersonOpts[person.id]?.product_id || savingPersonOpt === person.id}
+                          className="btn-secondary px-2.5 py-1.5 text-xs">
+                          {savingPersonOpt === person.id ? <Spinner size={12} /> : <Plus size={12} />}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {cmpPersons.length === 0 && (
+                  <p className="text-sm text-center py-2" style={{ color: 'var(--text-muted)' }}>Nenhuma personalização ainda.</p>
+                )}
+                <div className="rounded-xl p-3 space-y-2" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Novo Grupo de Escolha</p>
+                  <div className="flex gap-2">
+                    <input className="input text-sm flex-1" placeholder="Ex: Tipo de Energético"
+                      value={newPersonNome} onChange={e => setNewPersonNome(e.target.value)} />
+                    <input type="number" className="input text-sm w-20" placeholder="Qtd"
+                      value={newPersonQty} onChange={e => setNewPersonQty(e.target.value)} />
+                  </div>
+                  <button onClick={addPerson} disabled={!newPersonNome.trim() || savingPerson}
+                    className="btn-primary w-full py-3">
+                    {savingPerson ? <Spinner size={16} /> : <><Plus size={14} /> Criar Grupo</>}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tab: Adicionais */}
+            {cmpTab === 'adicionais' && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  {cmpAddons.length === 0 && (
+                    <p className="text-sm text-center py-3" style={{ color: 'var(--text-muted)' }}>Nenhum adicional configurado.</p>
+                  )}
+                  {cmpAddons.map(addon => (
+                    <div key={addon.id} className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                      style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-subtle)' }}>
+                      <span className="flex-1 text-sm" style={{ color: 'var(--text-primary)' }}>{addon.component?.nome ?? '—'}</span>
+                      <span className="text-xs font-mono" style={{ color: addon.price_delta > 0 ? 'var(--gold)' : 'var(--text-muted)' }}>
+                        {addon.price_delta > 0 ? `+R$ ${Number(addon.price_delta).toFixed(2).replace('.', ',')}` : 'grátis'}
+                      </span>
+                      <button onClick={() => removeCmpAddon(addon.id)}
+                        className="w-6 h-6 flex items-center justify-center rounded-lg"
+                        style={{ color: 'var(--red)', border: '1px solid var(--border-default)', background: 'var(--bg-base)' }}>
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-xl p-3 space-y-2" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Novo Adicional</p>
+                  <div className="flex gap-2">
+                    <select className="input text-sm flex-1" value={newAddon.product_id}
+                      onChange={e => setNewAddon(f => ({ ...f, product_id: e.target.value }))}>
+                      <option value="">Selecione produto</option>
+                      {products.filter(p => p.id !== compositeProduct?.id).map(p => (
+                        <option key={p.id} value={p.id}>{p.nome}</option>
+                      ))}
+                    </select>
+                    <input className="input text-sm w-24" placeholder="+R$ 0,00" value={newAddon.price_delta}
+                      onChange={e => setNewAddon(f => ({ ...f, price_delta: e.target.value }))} />
+                  </div>
+                  <button onClick={addCmpAddon} disabled={!newAddon.product_id || savingAddon}
+                    className="btn-secondary w-full py-2 text-sm">
+                    {savingAddon ? <Spinner size={14} /> : <><Plus size={13} /> Adicionar</>}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}

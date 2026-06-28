@@ -1,5 +1,8 @@
 export type UserRole = 'admin' | 'caixa' | 'operador'
-export type MesaStatus = 'disponivel' | 'ocupada' | 'reservada' | 'manutencao'
+export type ProductType = 'simples' | 'composto'
+export type MesaStatus = 'disponivel' | 'ocupada' | 'reservada' | 'manutencao' | 'solicitou_fechamento'
+export type SolicitacaoTipo = 'atendimento' | 'rosh' | 'fechamento'
+export type SolicitacaoStatus = 'pendente' | 'atendido'
 export type PedidoStatus = 'pendente' | 'preparo' | 'entregue' | 'cancelado'
 export type PagamentoMetodo = 'dinheiro' | 'pix' | 'credito' | 'debito' | 'cortesia'
 export type MovimentoTipo = 'entrada' | 'saida' | 'ajuste'
@@ -49,6 +52,7 @@ export interface Product {
   stock_minimo: number
   created_at: string
   production_sector?: 'BAR' | 'NARGUILE' | 'COZINHA' | 'CAIXA' | null
+  product_type?: ProductType
   categorias?: Categoria
 }
 
@@ -96,6 +100,7 @@ export interface Comanda {
   cliente_id: number | null
   pessoas: number | null
   observacao: string | null
+  session_token: string | null
   created_at: string
   mesas?: Mesa
   clientes?: Cliente
@@ -144,6 +149,79 @@ export interface ProductOption {
   created_at: string
 }
 
+export interface CompositeItem {
+  id: number
+  product_id: number
+  component_product_id: number
+  quantity: number
+  ordem: number
+  created_at: string
+  component?: Product
+}
+
+export interface CompositePersonalizationOption {
+  id: number
+  personalization_id: number
+  component_product_id: number
+  price_delta: number
+  is_default: boolean
+  ordem: number
+  created_at: string
+  component?: Product
+}
+
+export interface CompositePersonalization {
+  id: number
+  product_id: number
+  nome: string
+  quantidade: number
+  ordem: number
+  created_at: string
+  options?: CompositePersonalizationOption[]
+}
+
+export interface CompositeAddon {
+  id: number
+  product_id: number
+  component_product_id: number
+  price_delta: number
+  ordem: number
+  created_at: string
+  component?: Product
+}
+
+export interface CompositeConfig {
+  inclusions?: { component_product_id: number; component_nome: string; quantity: number }[]
+  personalizations: {
+    personalization_id: number
+    personalization_nome: string
+    option_id: number
+    option_nome: string
+    quantidade: number
+    price_delta: number
+    component_product_id: number
+    component_production_sector: string | null
+  }[]
+  addons: {
+    addon_id: number
+    addon_nome: string
+    price_delta: number
+    component_product_id: number
+    component_production_sector: string | null
+  }[]
+}
+
+export interface RoshEssencia {
+  id: number
+  nome: string
+  percentual: number
+}
+
+export interface RoshConfig {
+  tipo_mistura: 'unica' | 'meio_a_meio'
+  essencias: RoshEssencia[]
+}
+
 export interface PedidoItem {
   id: number
   pedido_id: number
@@ -155,6 +233,8 @@ export interface PedidoItem {
   is_rosh: boolean
   selected_options?: SelectedOption[] | null
   price_additions?: number
+  composite_config?: CompositeConfig | null
+  rosh_config?: RoshConfig | null
 }
 
 export interface Pagamento {
@@ -188,6 +268,17 @@ export interface OperationalNotification {
   created_at: string
   action_url: string | null
   ref_id: string | null
+}
+
+export interface MesaSolicitacao {
+  id: number
+  mesa_id: number
+  comanda_id: number | null
+  mesa_numero: number
+  tipo: SolicitacaoTipo
+  status: SolicitacaoStatus
+  created_at: string
+  mesas?: { id: number; numero: number }
 }
 
 export interface EstoqueMovimento {

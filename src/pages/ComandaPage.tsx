@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import type { Comanda, Pedido, PedidoItem, Pagamento, Mesa, Categoria, Product, SelectedOption, ProductOptionGroup } from '../types'
+import type { Comanda, Pedido, PedidoItem, Pagamento, Mesa, Categoria, Product, SelectedOption, ProductOptionGroup, CompositeConfig, RoshConfig } from '../types'
 import { Modal } from '../components/ui/Modal'
 import { OptionsModal, type GroupWithOptions } from '../components/ui/OptionsModal'
 import { Spinner } from '../components/ui/Spinner'
@@ -341,6 +341,23 @@ export default function ComandaPage() {
                             {item.selected_options.map(o => o.option_nome).join(' · ')}
                           </p>
                         )}
+                        {item.rosh_config && (
+                          <p className="text-[10px] mt-0.5 font-semibold" style={{ color: 'var(--gold)' }}>
+                            {item.rosh_config.tipo_mistura === 'unica'
+                              ? `Essência: ${item.rosh_config.essencias[0]?.nome ?? ''}`
+                              : `Meio a meio: ${item.rosh_config.essencias.map(e => e.nome).join(' + ')}`}
+                          </p>
+                        )}
+                        {item.composite_config && (
+                          <div className="text-[10px] mt-0.5 space-y-0.5">
+                            {(item.composite_config.personalizations ?? []).map((pp, idx) => (
+                              <p key={idx} style={{ color: 'var(--gold)' }}>{pp.personalization_nome}: {pp.option_nome}</p>
+                            ))}
+                            {(item.composite_config.addons ?? []).map((a, idx) => (
+                              <p key={idx} style={{ color: 'var(--text-muted)' }}>+ {a.addon_nome}</p>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <span className="text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>{fmt(Number(item.total_item))}</span>
                     </div>
@@ -437,27 +454,46 @@ type CartItem = {
   qty: number
   is_rosh: boolean
   selectedOptions: SelectedOption[]
+  compositeConfig?: CompositeConfig
+  roshConfig?: RoshConfig
+}
+
+interface CompositeData {
+  items: { id: number; component_product_id: number; quantity: number; component: { id: number; nome: string } | null }[]
+  personalizations: {
+    id: number; nome: string; quantidade: number
+    options?: { id: number; personalization_id: number; component_product_id: number; price_delta: number; is_default: boolean; component: { id: number; nome: string; production_sector: string | null } | null }[]
+  }[]
+  addons: { id: number; component_product_id: number; price_delta: number; component: { id: number; nome: string; production_sector: string | null } | null }[]
 }
 
 function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId: number; onDone: () => void }) {
   const { profile } = useAuth()
   const [categories, setCategories] = useState<Categoria[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [essencias, setEssencias] = useState<{ id: number; nome: string }[]>([])
   const [optionGroupsMap, setOptionGroupsMap] = useState<Record<number, GroupWithOptions[]>>({})
   const [selCat, setSelCat] = useState<number | null>(null)
   const [cart, setCart] = useState<CartItem[]>([])
   const [observacao, setObservacao] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null)
+  const [pendingComposite, setPendingComposite] = useState<Product | null>(null)
+  const [compositeData, setCompositeData] = useState<CompositeData | null>(null)
+  const [loadingComposite, setLoadingComposite] = useState(false)
+  const [pendingRosh, setPendingRosh] = useState<Product | null>(null)
 
   useEffect(() => {
     Promise.all([
       supabase.from('categorias').select('*').eq('exibe_cardapio', true).order('ordem'),
       supabase.from('products').select('*').eq('active', true).eq('exibe_cardapio', true).gt('stock_quantity', 0).order('nome'),
-    ]).then(async ([{ data: cats }, { data: prods }]) => {
+      supabase.from('products').select('id, nome').eq('is_insumo_rosh', true).eq('active', true).order('nome'),
+    ]).then(async ([{ data: cats }, { data: prods }, { data: ess }]) => {
       setCategories(cats ?? [])
       setProducts(prods ?? [])
+      setEssencias((ess ?? []) as { id: number; nome: string }[])
       if (cats?.[0]) setSelCat(cats[0].id)
 
       // Load option groups for all active products
@@ -492,13 +528,68 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
     })
   }, [])
 
-  function handleProductClick(p: Product) {
+  async function handleProductClick(p: Product) {
+    if (p.product_type === 'composto') {
+      setLoadingComposite(true)
+      try {
+        const [{ data: items }, { data: persons }, { data: addons }] = await Promise.all([
+          supabase.from('composite_items')
+            .select('*, component:component_product_id(id, nome)')
+            .eq('product_id', p.id).order('ordem'),
+          supabase.from('composite_personalizations')
+            .select('*, options:composite_personalization_options(*, component:component_product_id(id, nome, production_sector))')
+            .eq('product_id', p.id).order('ordem'),
+          supabase.from('composite_addons')
+            .select('*, component:component_product_id(id, nome, production_sector)')
+            .eq('product_id', p.id).order('ordem'),
+        ])
+        setCompositeData({
+          items: (items ?? []) as CompositeData['items'],
+          personalizations: (persons ?? []) as CompositeData['personalizations'],
+          addons: (addons ?? []) as CompositeData['addons'],
+        })
+        setPendingComposite(p)
+      } catch (err: any) {
+        setFormError(err?.message ?? 'Erro ao carregar produto composto. Tente novamente.')
+      } finally {
+        setLoadingComposite(false)
+      }
+      return
+    }
+    if (p.is_rosh) {
+      setPendingRosh(p)
+      return
+    }
     const groups = optionGroupsMap[p.id]
     if (groups && groups.length > 0) {
       setPendingProduct(p)
     } else {
       addDirect(p, [], 0)
     }
+  }
+
+  function addRosh(p: Product, roshConfig: RoshConfig) {
+    const essKey = roshConfig.essencias.map(e => e.id).sort().join(',')
+    const cartKey = `${p.id}-rosh-${roshConfig.tipo_mistura}-${essKey}`
+    setCart(c => {
+      const ex = c.find(i => i.cartKey === cartKey)
+      if (ex) return c.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + 1 } : i)
+      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions: 0, qty: 1, is_rosh: true, selectedOptions: [], roshConfig }]
+    })
+    setPendingRosh(null)
+  }
+
+  function addComposite(p: Product, config: CompositeConfig, priceAdditions: number) {
+    const configKey = [
+      ...(config.personalizations ?? []).map(pp => `p${pp.option_id}`),
+      ...(config.addons ?? []).map(a => `a${a.addon_id}`),
+    ].sort().join(',')
+    const cartKey = configKey ? `${p.id}-comp-${configKey}` : `${p.id}-comp`
+    setCart(c => {
+      const ex = c.find(i => i.cartKey === cartKey)
+      if (ex) return c.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + 1 } : i)
+      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions, qty: 1, is_rosh: p.is_rosh, selectedOptions: [], compositeConfig: config }]
+    })
   }
 
   function addDirect(p: Product, selectedOptions: SelectedOption[], priceAdditions: number) {
@@ -519,36 +610,70 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
   async function submit() {
     if (cart.length === 0) return
     setSaving(true)
-    const { data: pedido, error: pedidoErr } = await supabase
-      .from('pedidos')
-      .insert({ comanda_id: comandaId, mesa_id: mesaId, status: 'pendente', observacao: observacao || null, criado_por: profile?.id })
-      .select()
-      .single()
-    if (pedidoErr || !pedido) { setSaving(false); return }
+    setFormError(null)
+    try {
+      const items = cart.map(i => ({
+        product_id: i.id,
+        quantidade: i.qty,
+        price_additions: i.priceAdditions,
+        selected_options: i.selectedOptions.length > 0 ? i.selectedOptions : null,
+        composite_config: i.compositeConfig ?? null,
+        rosh_config: i.roshConfig ?? null,
+      }))
 
-    const itens = cart.map(i => ({
-      pedido_id: pedido.id,
-      product_id: i.id,
-      nome_produto: i.nome,
-      preco_unitario: i.preco,
-      quantidade: i.qty,
-      is_rosh: i.is_rosh,
-      selected_options: i.selectedOptions.length > 0 ? i.selectedOptions : null,
-      price_additions: i.priceAdditions,
-      total_item: (i.preco + i.priceAdditions) * i.qty,
-    }))
-    await supabase.from('pedido_itens').insert(itens)
+      const { data: result, error: rpcErr } = await supabase.rpc('fn_place_order', {
+        p_comanda_id: comandaId,
+        p_mesa_id: mesaId,
+        p_observacao: observacao || null,
+        p_items: items,
+        p_criado_por: profile?.id ?? null,
+      })
+      if (rpcErr || !result) {
+        setFormError(rpcErr?.message ?? 'Erro ao enviar pedido. Tente novamente.')
+        return
+      }
 
-    const pedidoTotal = itens.reduce((s, i) => s + i.total_item, 0)
-    await supabase.rpc('increment_comanda_total', { p_comanda_id: comandaId, p_delta: pedidoTotal })
-    const { error: estoqueErr } = await supabase.rpc('registrar_venda_estoque', { p_pedido_id: pedido.id, p_user_id: profile?.id ?? null })
-    if (estoqueErr) console.error('registrar_venda_estoque:', estoqueErr)
+      const pedidoId = (result as any).pedido_id
 
-    setSaving(false)
-    onDone()
+      const { error: estoqueErr } = await supabase.rpc('registrar_venda_estoque', { p_pedido_id: pedidoId, p_user_id: profile?.id ?? null })
+      if (estoqueErr) console.error('registrar_venda_estoque:', estoqueErr)
+
+      // Deduct component stock for composite items (fire-and-forget)
+      for (const item of cart) {
+        if (!item.compositeConfig) continue
+        const cfg = item.compositeConfig
+        const userId = profile?.id ?? null
+        const deductions: { product_id: number; qty: number }[] = [
+          ...(cfg.inclusions ?? []).map(inc => ({ product_id: inc.component_product_id, qty: inc.quantity * item.qty })),
+          ...cfg.personalizations.map(pp => ({ product_id: pp.component_product_id, qty: pp.quantidade * item.qty })),
+          ...cfg.addons.map(a => ({ product_id: a.component_product_id, qty: item.qty })),
+        ]
+        for (const d of deductions) {
+          supabase.rpc('deduct_component_stock', {
+            p_product_id: d.product_id,
+            p_quantidade: d.qty,
+            p_pedido_id: pedidoId,
+            p_user_id: userId,
+          }).then(({ error }) => { if (error) console.error('deduct_component_stock:', error) })
+        }
+      }
+
+      onDone()
+    } catch (err: any) {
+      setFormError(err?.message ?? 'Erro inesperado. Tente novamente.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <div className="flex justify-center py-10"><Spinner /></div>
+
+  if (loadingComposite) return (
+    <div className="flex flex-col items-center justify-center py-10 gap-2">
+      <Spinner size={24} />
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Carregando produto composto…</p>
+    </div>
+  )
 
   const filtered = selCat ? products.filter(p => p.categoria_id === selCat) : products
   const cartTotal = cart.reduce((s, i) => s + (i.preco + i.priceAdditions) * i.qty, 0)
@@ -556,6 +681,14 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
 
   return (
     <div className="space-y-4">
+      {pendingRosh && (
+        <RoshModal
+          product={pendingRosh}
+          essencias={essencias}
+          onConfirm={(config) => addRosh(pendingRosh, config)}
+          onClose={() => setPendingRosh(null)}
+        />
+      )}
       {pendingProduct && (
         <OptionsModal
           productNome={pendingProduct.nome}
@@ -566,6 +699,18 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
             setPendingProduct(null)
           }}
           onClose={() => setPendingProduct(null)}
+        />
+      )}
+      {pendingComposite && compositeData && (
+        <CompositeProductModal
+          product={pendingComposite}
+          data={compositeData}
+          onConfirm={(config, priceAdditions) => {
+            addComposite(pendingComposite, config, priceAdditions)
+            setPendingComposite(null)
+            setCompositeData(null)
+          }}
+          onClose={() => { setPendingComposite(null); setCompositeData(null) }}
         />
       )}
 
@@ -638,10 +783,27 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
                 style={{ background: 'var(--red-bg)', color: 'var(--red)' }}>−</button>
               <div className="flex-1 min-w-0">
                 <span style={{ color: 'var(--text-primary)' }}>{i.qty}× {i.nome}</span>
+                {i.roshConfig && (
+                  <p className="text-[10px] mt-0.5 font-semibold" style={{ color: 'var(--gold)' }}>
+                    {i.roshConfig.tipo_mistura === 'unica'
+                      ? `Essência: ${i.roshConfig.essencias[0]?.nome ?? ''}`
+                      : `Meio a meio: ${i.roshConfig.essencias.map(e => e.nome).join(' + ')}`}
+                  </p>
+                )}
                 {i.selectedOptions.length > 0 && (
                   <p className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
                     {i.selectedOptions.map(o => o.option_nome).join(', ')}
                   </p>
+                )}
+                {i.compositeConfig && (
+                  <div className="text-[10px] mt-0.5 space-y-0.5">
+                    {i.compositeConfig.personalizations.map((pp, idx) => (
+                      <p key={idx} style={{ color: 'var(--gold)' }}>{pp.personalization_nome}: {pp.option_nome}</p>
+                    ))}
+                    {i.compositeConfig.addons.map((a, idx) => (
+                      <p key={idx} style={{ color: 'var(--text-muted)' }}>+ {a.addon_nome}</p>
+                    ))}
+                  </div>
                 )}
               </div>
               <span className="text-xs font-mono shrink-0" style={{ color: 'var(--text-muted)' }}>
@@ -666,9 +828,342 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
           value={observacao} onChange={e => setObservacao(e.target.value)} />
       </div>
 
+      {formError && (
+        <div className="rounded-xl px-3 py-2.5 text-sm text-center" style={{ background: 'var(--red-bg)', border: '1px solid var(--red)', color: 'var(--red)' }}>
+          {formError}
+        </div>
+      )}
       <button onClick={submit} disabled={cart.length === 0 || saving} className="btn-primary w-full py-3.5">
         {saving ? <Spinner size={18} /> : `Enviar Pedido${cartTotal > 0 ? ` · R$ ${cartTotal.toFixed(2).replace('.', ',')}` : ''}`}
       </button>
+    </div>
+  )
+}
+
+function CompositeProductModal({
+  product, data, onConfirm, onClose,
+}: {
+  product: Product
+  data: CompositeData
+  onConfirm: (config: CompositeConfig, priceAdditions: number) => void
+  onClose: () => void
+}) {
+  const [selectedPersons, setSelectedPersons] = useState<Record<number, number>>(() => {
+    const defaults: Record<number, number> = {}
+    for (const p of data.personalizations) {
+      const opts = p.options ?? []
+      const def = opts.find(o => o.is_default) ?? opts[0]
+      if (def) defaults[p.id] = def.id
+    }
+    return defaults
+  })
+  const [selectedAddons, setSelectedAddons] = useState<Set<number>>(new Set())
+
+  let priceAdditions = 0
+  for (const p of data.personalizations) {
+    const selId = selectedPersons[p.id]
+    const opt = (p.options ?? []).find(o => o.id === selId)
+    if (opt) priceAdditions += Number(opt.price_delta)
+  }
+  for (const addonId of selectedAddons) {
+    const addon = data.addons.find(a => a.id === addonId)
+    if (addon) priceAdditions += Number(addon.price_delta)
+  }
+
+  const canConfirm = data.personalizations.every(p => selectedPersons[p.id] !== undefined)
+
+  function handleConfirm() {
+    const config: CompositeConfig = {
+      inclusions: data.items.map(item => ({
+        component_product_id: item.component_product_id,
+        component_nome: item.component?.nome ?? '',
+        quantity: item.quantity,
+      })),
+      personalizations: data.personalizations
+        .filter(p => selectedPersons[p.id])
+        .map(p => {
+          const selId = selectedPersons[p.id]
+          const opt = (p.options ?? []).find(o => o.id === selId)!
+          return {
+            personalization_id: p.id,
+            personalization_nome: p.nome,
+            option_id: opt.id,
+            option_nome: opt.component?.nome ?? '',
+            quantidade: p.quantidade,
+            price_delta: Number(opt.price_delta),
+            component_product_id: opt.component_product_id,
+            component_production_sector: opt.component?.production_sector ?? null,
+          }
+        }),
+      addons: data.addons
+        .filter(a => selectedAddons.has(a.id))
+        .map(a => ({
+          addon_id: a.id,
+          addon_nome: a.component?.nome ?? '',
+          price_delta: Number(a.price_delta),
+          component_product_id: a.component_product_id,
+          component_production_sector: a.component?.production_sector ?? null,
+        })),
+    }
+    onConfirm(config, priceAdditions)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
+      <div className="relative w-full md:max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl md:rounded-2xl"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+        {/* Header */}
+        <div className="sticky top-0 flex items-center justify-between px-4 py-3"
+          style={{ background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{product.nome}</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Configure seu pedido</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg"
+            style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          {/* Included items */}
+          {data.items.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Incluso no produto</p>
+              <div className="flex flex-wrap gap-1.5">
+                {data.items.map(item => (
+                  <span key={item.id} className="text-xs px-2 py-1 rounded-full"
+                    style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
+                    {item.quantity}× {item.component?.nome ?? '—'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Personalizations */}
+          {data.personalizations.map(person => (
+            <div key={person.id}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+                {person.nome}{person.quantidade > 1 ? ` (${person.quantidade}×)` : ''}
+              </p>
+              <div className="space-y-1.5">
+                {(person.options ?? []).map(opt => {
+                  const selected = selectedPersons[person.id] === opt.id
+                  return (
+                    <button key={opt.id} onClick={() => setSelectedPersons(s => ({ ...s, [person.id]: opt.id }))}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition"
+                      style={{
+                        background: selected ? 'var(--gold-bg)' : 'var(--bg-raised)',
+                        border: `1px solid ${selected ? 'var(--gold-border)' : 'var(--border-subtle)'}`,
+                      }}>
+                      <span className="w-3.5 h-3.5 rounded-full shrink-0 border-2 flex items-center justify-center"
+                        style={{ borderColor: selected ? 'var(--gold)' : 'var(--border-strong)', background: selected ? 'var(--gold)' : 'transparent' }}>
+                        {selected && <span className="w-1.5 h-1.5 rounded-full block" style={{ background: 'var(--bg-base)' }} />}
+                      </span>
+                      <span className="flex-1 text-sm" style={{ color: selected ? 'var(--gold)' : 'var(--text-primary)' }}>
+                        {opt.component?.nome ?? '—'}
+                      </span>
+                      <span className="text-xs font-mono" style={{ color: opt.price_delta > 0 ? 'var(--gold)' : 'var(--text-muted)' }}>
+                        {opt.price_delta > 0 ? `+R$ ${Number(opt.price_delta).toFixed(2).replace('.', ',')}` : 'incluso'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* Addons */}
+          {data.addons.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Adicionais (opcional)</p>
+              <div className="space-y-1.5">
+                {data.addons.map(addon => {
+                  const selected = selectedAddons.has(addon.id)
+                  return (
+                    <button key={addon.id} onClick={() => setSelectedAddons(s => {
+                      const ns = new Set(s)
+                      if (ns.has(addon.id)) ns.delete(addon.id)
+                      else ns.add(addon.id)
+                      return ns
+                    })}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition"
+                      style={{
+                        background: selected ? 'var(--gold-bg)' : 'var(--bg-raised)',
+                        border: `1px solid ${selected ? 'var(--gold-border)' : 'var(--border-subtle)'}`,
+                      }}>
+                      <span className="w-3.5 h-3.5 rounded shrink-0 border-2 flex items-center justify-center"
+                        style={{ borderColor: selected ? 'var(--gold)' : 'var(--border-strong)', background: selected ? 'var(--gold)' : 'transparent' }}>
+                        {selected && <span className="text-[8px] font-bold leading-none" style={{ color: 'var(--bg-base)' }}>✓</span>}
+                      </span>
+                      <span className="flex-1 text-sm" style={{ color: selected ? 'var(--gold)' : 'var(--text-primary)' }}>
+                        {addon.component?.nome ?? '—'}
+                      </span>
+                      <span className="text-xs font-mono" style={{ color: addon.price_delta > 0 ? 'var(--gold)' : 'var(--text-muted)' }}>
+                        {addon.price_delta > 0 ? `+R$ ${Number(addon.price_delta).toFixed(2).replace('.', ',')}` : 'grátis'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Total + confirm */}
+          <div className="pt-2 space-y-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Total</span>
+              <span className="font-mono font-bold text-lg" style={{ color: 'var(--gold)' }}>
+                R$ {(product.preco + priceAdditions).toFixed(2).replace('.', ',')}
+              </span>
+            </div>
+            <button onClick={handleConfirm} disabled={!canConfirm} className="btn-primary w-full py-3.5">
+              Adicionar ao Pedido
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RoshModal({
+  product, essencias, onConfirm, onClose,
+}: {
+  product: Product
+  essencias: { id: number; nome: string }[]
+  onConfirm: (config: RoshConfig) => void
+  onClose: () => void
+}) {
+  const [modo, setModo] = useState<'unica' | 'meio_a_meio' | null>(null)
+  const [selected, setSelected] = useState<number[]>([])
+
+  function toggle(id: number) {
+    if (modo === 'unica') {
+      setSelected([id])
+    } else {
+      if (selected.includes(id)) {
+        setSelected(s => s.filter(x => x !== id))
+      } else if (selected.length < 2) {
+        setSelected(s => [...s, id])
+      }
+    }
+  }
+
+  const canConfirm = modo === 'unica' ? selected.length === 1 : selected.length === 2
+
+  function confirm() {
+    if (!canConfirm || !modo) return
+    onConfirm({
+      tipo_mistura: modo,
+      essencias: selected.map(id => ({
+        id,
+        nome: essencias.find(e => e.id === id)?.nome ?? '',
+        percentual: modo === 'unica' ? 100 : 50,
+      })),
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
+      <div className="relative w-full md:max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl md:rounded-2xl"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
+
+        {/* Header */}
+        <div className="sticky top-0 flex items-center justify-between px-4 py-3"
+          style={{ background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{product.nome}</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Escolha da essência</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg"
+            style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* Step 1: mode */}
+          {!modo && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Tipo de mistura
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => { setModo('unica'); setSelected([]) }}
+                  className="p-4 rounded-xl text-sm font-semibold transition active:scale-95 text-center"
+                  style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}>
+                  💨<br />Uma Essência
+                </button>
+                <button onClick={() => { setModo('meio_a_meio'); setSelected([]) }}
+                  className="p-4 rounded-xl text-sm font-semibold transition active:scale-95 text-center"
+                  style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}>
+                  🔥<br />Meio a Meio
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: essence list */}
+          {modo && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  {modo === 'unica' ? 'Escolha 1 essência' : `Escolha 2 essências (${selected.length}/2)`}
+                </p>
+                <button onClick={() => { setModo(null); setSelected([]) }}
+                  className="text-xs px-2 py-0.5 rounded"
+                  style={{ color: 'var(--text-muted)', background: 'var(--bg-raised)', border: '1px solid var(--border-default)' }}>
+                  ← Voltar
+                </button>
+              </div>
+              {essencias.length === 0 && (
+                <p className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>
+                  Nenhuma essência cadastrada. Adicione produtos com "É insumo Rosh" ativo.
+                </p>
+              )}
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {essencias.map(e => {
+                  const isSel = selected.includes(e.id)
+                  const isDisabled = !isSel && modo === 'meio_a_meio' && selected.length >= 2
+                  return (
+                    <button key={e.id} onClick={() => !isDisabled && toggle(e.id)}
+                      disabled={isDisabled}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition"
+                      style={{
+                        background: isSel ? 'var(--gold-bg)' : 'var(--bg-raised)',
+                        border: `1px solid ${isSel ? 'var(--gold-border)' : 'var(--border-subtle)'}`,
+                        opacity: isDisabled ? 0.4 : 1,
+                      }}>
+                      <span className={`w-3.5 h-3.5 ${modo === 'unica' ? 'rounded-full' : 'rounded'} shrink-0 border-2 flex items-center justify-center`}
+                        style={{ borderColor: isSel ? 'var(--gold)' : 'var(--border-strong)', background: isSel ? 'var(--gold)' : 'transparent' }}>
+                        {isSel && (
+                          modo === 'unica'
+                            ? <span className="w-1.5 h-1.5 rounded-full block" style={{ background: 'var(--bg-base)' }} />
+                            : <span className="text-[8px] font-bold leading-none" style={{ color: 'var(--bg-base)' }}>✓</span>
+                        )}
+                      </span>
+                      <span className="flex-1 text-sm" style={{ color: isSel ? 'var(--gold)' : 'var(--text-primary)' }}>
+                        {e.nome}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              <button onClick={confirm} disabled={!canConfirm} className="btn-primary w-full py-3.5">
+                {canConfirm
+                  ? modo === 'unica'
+                    ? `Confirmar: ${essencias.find(e => e.id === selected[0])?.nome ?? ''}`
+                    : `Confirmar: ${selected.map(id => essencias.find(e => e.id === id)?.nome ?? '').join(' + ')}`
+                  : modo === 'unica' ? 'Selecione uma essência' : `Selecione mais ${2 - selected.length} essência(s)`}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -13,6 +13,14 @@ interface ProdItem {
   nome_produto: string
   quantidade: number
   selected_options: { group_nome: string; option_nome: string }[] | null
+  composite_config: {
+    personalizations: { personalization_nome: string; option_nome: string; price_delta: number }[]
+    addons: { addon_nome: string; price_delta: number }[]
+  } | null
+  rosh_config: {
+    tipo_mistura: 'unica' | 'meio_a_meio'
+    essencias: { id: number; nome: string; percentual: number }[]
+  } | null
   products: { production_sector: string | null } | null
 }
 
@@ -51,13 +59,23 @@ function formatElapsed(m: number): string {
   return `${Math.floor(m / 60)}h${m % 60 ? String(m % 60).padStart(2, '0') : ''}`
 }
 
-function getEssencia(item: ProdItem): string | null {
-  if (!item.selected_options) return null
-  const opt = item.selected_options.find(o =>
-    o.group_nome?.toLowerCase().includes('essência') ||
-    o.group_nome?.toLowerCase().includes('essencia')
-  )
-  return opt?.option_nome ?? null
+function getRoshDisplay(item: ProdItem): { label: string; value: string } | null {
+  if (item.rosh_config) {
+    const cfg = item.rosh_config
+    if (cfg.tipo_mistura === 'meio_a_meio') {
+      return { label: 'Meio a meio', value: cfg.essencias.map(e => e.nome).join(' + ') }
+    }
+    return { label: 'Essência', value: cfg.essencias[0]?.nome ?? '' }
+  }
+  // backwards compat: selected_options with essência group
+  if (item.selected_options) {
+    const opt = item.selected_options.find(o =>
+      o.group_nome?.toLowerCase().includes('essência') ||
+      o.group_nome?.toLowerCase().includes('essencia')
+    )
+    if (opt) return { label: 'Essência', value: opt.option_nome }
+  }
+  return null
 }
 
 function playNewOrderSound() {
@@ -103,7 +121,7 @@ export default function ProducaoPage() {
     const since = startOfDay(new Date()).toISOString()
     const { data } = await supabase
       .from('pedidos')
-      .select('id, status, observacao, created_at, pedido_itens(id, nome_produto, quantidade, selected_options, products(production_sector)), comandas(mesas(numero))')
+      .select('id, status, observacao, created_at, pedido_itens(id, nome_produto, quantidade, selected_options, composite_config, rosh_config, products(production_sector)), comandas(mesas(numero))')
       .eq('status', 'entregue')
       .gte('created_at', since)
       .order('created_at', { ascending: false })
@@ -118,7 +136,7 @@ export default function ProducaoPage() {
   const load = useCallback(async () => {
     const { data } = await supabase
       .from('pedidos')
-      .select('id, status, observacao, created_at, pedido_itens(id, nome_produto, quantidade, selected_options, products(production_sector)), comandas(mesas(numero))')
+      .select('id, status, observacao, created_at, pedido_itens(id, nome_produto, quantidade, selected_options, composite_config, rosh_config, products(production_sector)), comandas(mesas(numero))')
       .in('status', ['pendente', 'preparo'])
       .order('created_at')
 
@@ -350,11 +368,13 @@ export default function ProducaoPage() {
                     <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>— {p.observacao}</p>
                   )}
                   {p.pedido_itens.map(item => {
-                    const essencia = setor === 'NARGUILE' ? getEssencia(item) : null
+                    const roshDisplay = setor === 'NARGUILE' ? getRoshDisplay(item) : null
                     const otherOpts = (item.selected_options ?? []).filter(o =>
                       !o.group_nome?.toLowerCase().includes('essência') &&
                       !o.group_nome?.toLowerCase().includes('essencia')
                     )
+                    const cmpPersons = item.composite_config?.personalizations ?? []
+                    const cmpAddons = item.composite_config?.addons ?? []
                     return (
                       <div key={item.id} className="flex items-start gap-2.5">
                         <span className="font-mono font-bold text-sm w-6 shrink-0" style={{ color: 'var(--gold)' }}>
@@ -364,9 +384,11 @@ export default function ProducaoPage() {
                           <span className="text-sm leading-snug" style={{ color: 'var(--text-primary)' }}>
                             {item.nome_produto}
                           </span>
-                          {essencia && (
-                            <p className="text-[11px] font-semibold mt-0.5" style={{ color: 'var(--gold)' }}>
-                              <Wind size={9} className="inline mr-1" />{essencia}
+                          {roshDisplay && (
+                            <p className="text-[11px] font-bold mt-1 px-2 py-1 rounded-lg"
+                              style={{ color: 'var(--gold)', background: 'rgba(212,175,55,0.10)', border: '1px solid rgba(212,175,55,0.20)' }}>
+                              <Wind size={9} className="inline mr-1" />
+                              {roshDisplay.label}: {roshDisplay.value}
                             </p>
                           )}
                           {otherOpts.length > 0 && (
@@ -374,6 +396,16 @@ export default function ProducaoPage() {
                               {otherOpts.map(o => o.option_nome).join(' · ')}
                             </p>
                           )}
+                          {cmpPersons.map((pp, idx) => (
+                            <p key={idx} className="text-[11px] font-semibold mt-0.5" style={{ color: 'var(--gold)' }}>
+                              {pp.personalization_nome}: {pp.option_nome}
+                            </p>
+                          ))}
+                          {cmpAddons.map((a, idx) => (
+                            <p key={idx} className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                              + {a.addon_nome}
+                            </p>
+                          ))}
                         </div>
                       </div>
                     )

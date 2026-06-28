@@ -17,6 +17,7 @@ interface WelcomePayload {
   mesaId: number
   comandaId: number
   clienteNome: string
+  sessionToken: string
 }
 
 async function fetchConfig(): Promise<WppConfig | null> {
@@ -24,9 +25,9 @@ async function fetchConfig(): Promise<WppConfig | null> {
   return data ?? null
 }
 
-function buildMenuUrl(mesaId: number): string {
+function buildSessionUrl(sessionToken: string): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  return `${origin}/m/${mesaId}`
+  return `${origin}/q/${sessionToken}`
 }
 
 async function sendViaEvolution(cfg: WppConfig, phone: string, message: string): Promise<void> {
@@ -83,11 +84,20 @@ export async function sendWhatsAppWelcome(payload: WelcomePayload): Promise<void
   const cfg = await fetchConfig()
   if (!cfg || !cfg.ativo) return
 
-  const menuUrl = buildMenuUrl(payload.mesaId)
+  const sessionUrl = buildSessionUrl(payload.sessionToken)
   const message =
-    `Olá, ${payload.clienteNome}! 🥃\n` +
-    `Você está na Mesa ${payload.mesaNumero} do Lux Lounge.\n\n` +
-    `Acompanhe seus pedidos e solicite atendimento pelo link:\n${menuUrl}`
+    `Olá, ${payload.clienteNome} 👋\n\n` +
+    `Seja bem-vindo à Lux Lounge.\n\n` +
+    `Sua mesa já está ativa.\n\n` +
+    `Através deste link você poderá:\n\n` +
+    `🍹 Fazer pedidos\n` +
+    `🔥 Solicitar troca de rosh\n` +
+    `🔔 Chamar atendimento\n` +
+    `💳 Solicitar sua conta\n` +
+    `📦 Acompanhar pedidos em tempo real\n\n` +
+    `Acesse:\n\n` +
+    `${sessionUrl}\n\n` +
+    `Tenha uma ótima experiência.`
 
   const logPayload = { phone: payload.phone, provider: cfg.provider, mesaNumero: payload.mesaNumero }
 
