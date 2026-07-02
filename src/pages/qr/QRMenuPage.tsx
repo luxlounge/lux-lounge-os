@@ -6,7 +6,7 @@ import { OptionsModal, type GroupWithOptions } from '../../components/ui/Options
 import type { SelectedOption, CompositeConfig, RoshConfig } from '../../types'
 import {
   ShoppingCart, Plus, Minus, Send, CheckCircle, AlertCircle, Wind,
-  Bell, Flame, Receipt, X, BookOpen, Clock, ChevronLeft,
+  Bell, Flame, Receipt, X, BookOpen, Clock, ChevronLeft, Wallet,
 } from 'lucide-react'
 
 // ─── Local types ────────────────────────────────────────────────────────────
@@ -15,6 +15,13 @@ interface Produto {
   id: number; nome: string; categoria_id: number
   preco: number; stock_quantity: number; is_rosh: boolean
   imagem_url: string | null; product_type: 'simples' | 'composto'
+  quantidade_total_essencia?: number
+}
+
+interface EssenciaOpcao {
+  id: number
+  nome: string
+  preco_adicional_rosh: number
 }
 interface CartItem {
   cartKey: string; id: number; nome: string
@@ -37,8 +44,15 @@ interface CompositeData {
   }[]
   addons: { id: number; component_product_id: number; price_delta: number; component: { id: number; nome: string; production_sector: string | null } | null }[]
 }
-type Fase = 'loading' | 'welcome' | 'menu' | 'fechada' | 'unavailable'
-type Tab = 'cardapio' | 'pedidos' | 'solicitar'
+type Fase = 'loading' | 'welcome' | 'menu' | 'fechada' | 'unavailable' | 'avaliar'
+type Tab = 'cardapio' | 'pedidos' | 'solicitar' | 'conta'
+
+interface Pagamento {
+  id: number
+  valor: number
+  metodo: string
+  created_at: string
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const PEDIDO_STATUS = {
@@ -532,12 +546,14 @@ function RoshModal({
   product, essencias, onConfirm, onClose,
 }: {
   product: Produto
-  essencias: { id: number; nome: string }[]
-  onConfirm: (config: RoshConfig) => void
+  essencias: EssenciaOpcao[]
+  onConfirm: (config: RoshConfig, priceAdditions: number) => void
   onClose: () => void
 }) {
   const [modo, setModo] = useState<'unica' | 'meio_a_meio' | null>(null)
   const [selected, setSelected] = useState<number[]>([])
+
+  const sessaoGramas = product.quantidade_total_essencia ?? 10
 
   function toggle(id: number) {
     if (modo === 'unica') {
@@ -553,16 +569,27 @@ function RoshModal({
 
   const canConfirm = modo === 'unica' ? selected.length === 1 : selected.length === 2
 
+  const adicionalTotal = selected.reduce((sum, id) => {
+    return sum + (essencias.find(e => e.id === id)?.preco_adicional_rosh ?? 0)
+  }, 0)
+
   function confirm() {
     if (!canConfirm || !modo) return
-    onConfirm({
-      tipo_mistura: modo,
-      essencias: selected.map(id => ({
-        id,
-        nome: essencias.find(e => e.id === id)?.nome ?? '',
-        percentual: modo === 'unica' ? 100 : 50,
-      })),
-    })
+    const percentual = modo === 'unica' ? 100 : 50
+    const config: RoshConfig = {
+      sessao_gramas_total: sessaoGramas,
+      essencias: selected.map(id => {
+        const ess = essencias.find(e => e.id === id)!
+        return {
+          id,
+          nome: ess.nome,
+          percentual,
+          gramas: sessaoGramas * (percentual / 100),
+          preco_adicional: ess.preco_adicional_rosh,
+        }
+      }),
+    }
+    onConfirm(config, adicionalTotal)
   }
 
   return (
@@ -598,7 +625,7 @@ function RoshModal({
                 <span className="text-3xl">🔥</span>
                 <div className="text-left">
                   <p className="font-bold text-white text-base">Meio a Meio</p>
-                  <p className="text-[12px] text-[#555] mt-0.5">Combine duas essências distintas</p>
+                  <p className="text-[12px] text-[#555] mt-0.5">50% cada — combine duas essências</p>
                 </div>
               </button>
             </div>
@@ -616,6 +643,12 @@ function RoshModal({
               {essencias.length === 0 && (
                 <p className="text-xs text-center py-4 text-[#444]">Nenhuma essência disponível no momento.</p>
               )}
+              {adicionalTotal > 0 && (
+                <div className="px-4 py-2.5 rounded-xl border border-amber-500/25 bg-amber-500/8 flex items-center justify-between">
+                  <span className="text-xs text-amber-400">Adicional de essência</span>
+                  <span className="text-xs font-bold text-amber-400">+{fmtBRL(adicionalTotal)}</span>
+                </div>
+              )}
               <div className="space-y-2">
                 {essencias.map(e => {
                   const isSel = selected.includes(e.id)
@@ -627,13 +660,18 @@ function RoshModal({
                         ${isSel ? 'border-gold/50 bg-gold/8' : 'border-ink-border bg-ink-raised'}
                         ${isDisabled ? 'opacity-40' : ''}`}>
                       <span className="text-sm text-white">{e.nome}</span>
-                      <div className={`w-4 h-4 ${modo === 'unica' ? 'rounded-full' : 'rounded-md'} border-2 flex items-center justify-center transition
-                        ${isSel ? 'border-gold bg-gold' : 'border-[#444]'}`}>
-                        {isSel && (
-                          modo === 'unica'
-                            ? <div className="w-1.5 h-1.5 rounded-full bg-ink" />
-                            : <CheckCircle size={10} className="text-ink" />
+                      <div className="flex items-center gap-2">
+                        {e.preco_adicional_rosh > 0 && (
+                          <span className="text-[11px] text-amber-400">+{fmtBRL(e.preco_adicional_rosh)}</span>
                         )}
+                        <div className={`w-4 h-4 ${modo === 'unica' ? 'rounded-full' : 'rounded-md'} border-2 flex items-center justify-center transition
+                          ${isSel ? 'border-gold bg-gold' : 'border-[#444]'}`}>
+                          {isSel && (
+                            modo === 'unica'
+                              ? <div className="w-1.5 h-1.5 rounded-full bg-ink" />
+                              : <CheckCircle size={10} className="text-ink" />
+                          )}
+                        </div>
                       </div>
                     </button>
                   )
@@ -649,14 +687,193 @@ function RoshModal({
             <button onClick={confirm} disabled={!canConfirm}
               className="w-full py-4 rounded-2xl bg-gold text-ink font-bold text-base shadow-gold transition active:scale-[0.98] disabled:opacity-40">
               {canConfirm
-                ? modo === 'unica'
-                  ? `Confirmar: ${essencias.find(e => e.id === selected[0])?.nome ?? ''}`
-                  : `Confirmar: ${selected.map(id => essencias.find(e => e.id === id)?.nome ?? '').join(' + ')}`
+                ? `Confirmar${adicionalTotal > 0 ? ` · +${fmtBRL(adicionalTotal)}` : ''}`
                 : modo === 'unica' ? 'Selecione uma essência' : `Selecione mais ${2 - selected.length} essência(s)`}
             </button>
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── Star Rating ──────────────────────────────────────────────────────────────
+function StarRating({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <span className="text-[11px] text-[#555] uppercase tracking-widest">{label}</span>
+      <div className="flex gap-2">
+        {[1,2,3,4,5].map(n => (
+          <button key={n} onClick={() => onChange(n)}
+            className="text-2xl transition active:scale-90"
+            style={{ color: n <= value ? '#D4AF37' : '#2a2a2a' }}>
+            ★
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Avaliação screen — shown after comanda fechada
+function AvaliarScreen({
+  comandaId, sessionToken, onDone,
+}: {
+  comandaId: number | null; sessionToken: string | null; onDone: () => void
+}) {
+  const [geral, setGeral]           = useState(0)
+  const [atendimento, setAtendimento] = useState(0)
+  const [produto, setProduto]       = useState(0)
+  const [ambiente, setAmbiente]     = useState(0)
+  const [comentario, setComentario] = useState('')
+  const [sending, setSending]       = useState(false)
+  const [done, setDone]             = useState(false)
+
+  async function submit() {
+    if (geral === 0) return
+    setSending(true)
+    try {
+      await supabase.from('avaliacoes').insert({
+        comanda_id: comandaId,
+        session_token: sessionToken,
+        nota_geral: geral,
+        nota_atendimento: atendimento || null,
+        nota_produto: produto || null,
+        nota_ambiente: ambiente || null,
+        comentario: comentario.trim() || null,
+      })
+      setDone(true)
+      setTimeout(onDone, 2000)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (done) return (
+    <div className="min-h-screen bg-ink flex flex-col items-center justify-center text-center px-8 animate-fade-in">
+      <div className="text-5xl mb-4">🙏</div>
+      <h2 className="text-xl font-bold text-white mb-2">Obrigado pela avaliação!</h2>
+      <p className="text-sm text-[#555]">Seu feedback nos ajuda a melhorar.</p>
+    </div>
+  )
+
+  return (
+    <div className="min-h-screen bg-ink flex flex-col animate-fade-in">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 pb-8">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <div className="text-4xl mb-3">⭐</div>
+            <h2 className="text-xl font-bold text-white mb-1">Como foi sua experiência?</h2>
+            <p className="text-sm text-[#555]">Sua opinião é muito importante para nós.</p>
+          </div>
+
+          <div className="bg-ink-card border border-ink-border rounded-2xl p-6 space-y-6">
+            <StarRating value={geral} onChange={setGeral} label="Geral *" />
+            <div className="border-t border-ink-border pt-5 space-y-5">
+              <StarRating value={atendimento} onChange={setAtendimento} label="Atendimento" />
+              <StarRating value={produto} onChange={setProduto} label="Produtos" />
+              <StarRating value={ambiente} onChange={setAmbiente} label="Ambiente" />
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <textarea
+              className="w-full bg-ink-card border border-ink-border rounded-2xl px-4 py-3 text-sm text-white placeholder-[#444] outline-none focus:border-gold/40 transition resize-none"
+              rows={3}
+              placeholder="Deixe um comentário (opcional)…"
+              value={comentario}
+              onChange={e => setComentario(e.target.value)}
+            />
+          </div>
+
+          <button
+            onClick={submit}
+            disabled={geral === 0 || sending}
+            className="w-full mt-4 py-4 rounded-2xl bg-gold text-ink font-bold text-base flex items-center justify-center gap-2 shadow-gold transition active:scale-[0.98] disabled:opacity-40">
+            {sending ? <Spinner size={20} /> : 'Enviar Avaliação'}
+          </button>
+          <button onClick={onDone} className="w-full mt-2 py-3 text-sm text-[#444] transition active:text-[#666]">
+            Pular
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Conta Tab ───────────────────────────────────────────────────────────────
+function ContaTab({
+  total, totalPago, pagamentos, pedidos,
+}: {
+  total: number
+  totalPago: number
+  pagamentos: Pagamento[]
+  pedidos: PedidoTracking[]
+}) {
+  const saldo = Math.max(0, total - totalPago)
+  const consumidoItens = pedidos
+    .filter(p => p.status !== 'cancelado')
+    .flatMap(p => p.itens)
+
+  return (
+    <div className="p-4 space-y-5 animate-fade-in pb-10">
+      <p className="text-[11px] text-[#444] uppercase tracking-widest">Resumo da conta</p>
+
+      {/* Totais */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: 'Consumido', value: fmtBRL(total), color: '#fff' },
+          { label: 'Pago', value: fmtBRL(totalPago), color: '#22c55e' },
+          { label: 'Saldo', value: fmtBRL(saldo), color: saldo > 0 ? '#f59e0b' : '#22c55e' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="rounded-2xl border border-ink-border bg-ink-card p-4 text-center">
+            <p className="text-[10px] text-[#444] uppercase tracking-widest mb-1">{label}</p>
+            <p className="font-bold text-base" style={{ color }}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Histórico de consumo */}
+      {consumidoItens.length > 0 && (
+        <div>
+          <p className="text-[10px] text-[#444] uppercase tracking-widest mb-3">Itens consumidos</p>
+          <div className="space-y-2">
+            {consumidoItens.map((item, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-3 rounded-2xl border border-ink-border bg-ink-raised">
+                <span className="text-sm text-white">{item.nome_produto}</span>
+                <span className="text-sm text-[#555]">× {item.quantidade}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pagamentos */}
+      {pagamentos.length > 0 && (
+        <div>
+          <p className="text-[10px] text-[#444] uppercase tracking-widest mb-3">Pagamentos recebidos</p>
+          <div className="space-y-2">
+            {pagamentos.map(pg => (
+              <div key={pg.id} className="flex items-center justify-between px-4 py-3 rounded-2xl border border-ink-border bg-ink-raised">
+                <div>
+                  <p className="text-sm text-white capitalize">{pg.metodo}</p>
+                  <p className="text-[10px] text-[#444] mt-0.5">
+                    {new Date(pg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+                <span className="text-sm font-bold text-green-400">{fmtBRL(pg.valor)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {pagamentos.length === 0 && consumidoItens.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+          <Wallet size={28} className="text-[#333]" />
+          <p className="text-sm text-[#444]">Sua conta aparecerá aqui em tempo real.</p>
+        </div>
+      )}
     </div>
   )
 }
@@ -670,10 +887,11 @@ export default function QRMenuPage() {
   const [fase, setFase]           = useState<Fase>('loading')
   const [activeTab, setActiveTab] = useState<Tab>('cardapio')
   const [mesa, setMesa]           = useState<{ id: number; numero: number; status: string } | null>(null)
-  const [comanda, setComanda]     = useState<{ id: number; status: string } | null>(null)
+  const [comanda, setComanda]     = useState<{ id: number; status: string; total?: number; total_pago?: number } | null>(null)
+  const [pagamentos, setPagamentos] = useState<Pagamento[]>([])
   const [categories, setCategories]     = useState<Categoria[]>([])
   const [products, setProducts]         = useState<Produto[]>([])
-  const [essencias, setEssencias]       = useState<{ id: number; nome: string }[]>([])
+  const [essencias, setEssencias]       = useState<EssenciaOpcao[]>([])
   const [optionGroupsMap, setOptionGroupsMap] = useState<Record<number, GroupWithOptions[]>>({})
   const [cart, setCart]           = useState<CartItem[]>([])
   const [cartOpen, setCartOpen]   = useState(false)
@@ -690,9 +908,11 @@ export default function QRMenuPage() {
   const [actionSending, setActionSending]     = useState<string | null>(null)
   const [toast, setToast]         = useState<{ msg: string; sub: string; variant?: 'error' } | null>(null)
 
+  const [avaliacaoSent, setAvaliacaoSent] = useState(false)
   const prevStatusesRef  = useRef<Record<number, string>>({})
   const channelRefMesa   = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const channelRefPedidos = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const channelRefPagamentos = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // ── Fetch pedidos ───────────────────────────────────────────────────────────
   const fetchMeusPedidos = useCallback(async (comandaId: number) => {
@@ -709,16 +929,29 @@ export default function QRMenuPage() {
       itens: p.pedido_itens ?? [],
     }))
 
-    // Detect status changes → show toast
+    // Detect status changes → show toast + vibrate on entregue
     for (const p of pedidos) {
       const prev = prevStatusesRef.current[p.id]
       if (prev && prev !== p.status && p.status !== 'cancelado') {
         const s = PEDIDO_STATUS[p.status as keyof typeof PEDIDO_STATUS]
         if (s) setToast({ msg: `Pedido #${p.id} — ${s.label}`, sub: s.desc })
+        if (p.status === 'entregue') {
+          try { navigator.vibrate?.([200, 100, 200]) } catch { /* not available */ }
+        }
       }
       prevStatusesRef.current[p.id] = p.status
     }
     setMeusPedidos(pedidos)
+  }, [])
+
+  // ── Fetch extrato (totals + pagamentos) ────────────────────────────────────
+  const fetchExtrato = useCallback(async (comandaId: number) => {
+    const [{ data: c }, { data: pgs }] = await Promise.all([
+      supabase.from('comandas').select('total, total_pago').eq('id', comandaId).single(),
+      supabase.from('pagamentos').select('id, valor, metodo, created_at').eq('comanda_id', comandaId).order('created_at', { ascending: false }),
+    ])
+    if (c) setComanda(prev => prev ? { ...prev, total: c.total ?? 0, total_pago: c.total_pago ?? 0 } : prev)
+    setPagamentos((pgs ?? []) as Pagamento[])
   }, [])
 
   // ── Init ─────────────────────────────────────────────────────────────────────
@@ -774,13 +1007,15 @@ export default function QRMenuPage() {
       const [{ data: cats }, { data: prods }, { data: ess }] = await Promise.all([
         supabase.from('categorias').select('*').eq('exibe_cardapio', true).order('ordem'),
         supabase.from('products')
-          .select('id, nome, categoria_id, preco, stock_quantity, is_rosh, imagem_url, product_type')
+          .select('id, nome, categoria_id, preco, stock_quantity, is_rosh, imagem_url, product_type, quantidade_total_essencia')
           .eq('active', true).eq('exibe_cardapio', true).gt('stock_quantity', 0).order('nome'),
-        supabase.from('products').select('id, nome').eq('is_insumo_rosh', true).eq('active', true).order('nome'),
+        supabase.from('products')
+          .select('id, nome, preco_adicional_rosh')
+          .eq('is_essencia', true).eq('active', true).order('nome'),
       ])
       setCategories(cats ?? [])
       setProducts(prods ?? [])
-      setEssencias((ess ?? []) as { id: number; nome: string }[])
+      setEssencias((ess ?? []) as EssenciaOpcao[])
 
       const productIds = (prods ?? []).map((p: Produto) => p.id)
       if (productIds.length > 0) {
@@ -804,7 +1039,10 @@ export default function QRMenuPage() {
         setOptionGroupsMap(map)
       }
 
-      await fetchMeusPedidos(comandaData!.id)
+      await Promise.all([
+        fetchMeusPedidos(comandaData!.id),
+        fetchExtrato(comandaData!.id),
+      ])
       setFase('welcome')
     }
     init()
@@ -824,7 +1062,7 @@ export default function QRMenuPage() {
         (payload) => {
           const newStatus = (payload.new as any).status
           if (newStatus === 'fechada') {
-            setFase('fechada')
+            setFase(sessionToken ? 'avaliar' : 'fechada')
           }
         })
       .subscribe()
@@ -841,6 +1079,19 @@ export default function QRMenuPage() {
       .subscribe()
     return () => { channelRefPedidos.current?.unsubscribe() }
   }, [comanda?.id, fetchMeusPedidos])
+
+  // ── Realtime: pagamentos + comanda totals ────────────────────────────────────
+  useEffect(() => {
+    if (!comanda) return
+    channelRefPagamentos.current = supabase
+      .channel(`qr-conta-${comanda.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pagamentos', filter: `comanda_id=eq.${comanda.id}` },
+        () => fetchExtrato(comanda.id))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'comandas', filter: `id=eq.${comanda.id}` },
+        () => fetchExtrato(comanda.id))
+      .subscribe()
+    return () => { channelRefPagamentos.current?.unsubscribe() }
+  }, [comanda?.id, fetchExtrato])
 
   // ── Product click ────────────────────────────────────────────────────────────
   async function handleProductClick(p: Produto) {
@@ -885,13 +1136,13 @@ export default function QRMenuPage() {
   }
 
   // ── Cart helpers ─────────────────────────────────────────────────────────────
-  function addRosh(p: Produto, roshConfig: RoshConfig) {
+  function addRosh(p: Produto, roshConfig: RoshConfig, priceAdditions: number) {
     const essKey = roshConfig.essencias.map(e => e.id).sort().join(',')
-    const cartKey = `${p.id}-rosh-${roshConfig.tipo_mistura}-${essKey}`
+    const cartKey = `${p.id}-rosh-${essKey}`
     setCart(c => {
       const ex = c.find(i => i.cartKey === cartKey)
       if (ex) return c.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + 1 } : i)
-      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions: 0, qty: 1, is_rosh: true, selectedOptions: [], roshConfig }]
+      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions, qty: 1, is_rosh: true, selectedOptions: [], roshConfig }]
     })
     setRoshProduct(null)
   }
@@ -1042,6 +1293,14 @@ export default function QRMenuPage() {
     </div>
   )
 
+  if (fase === 'avaliar') return (
+    <AvaliarScreen
+      comandaId={comanda?.id ?? null}
+      sessionToken={sessionToken ?? null}
+      onDone={() => setFase('fechada')}
+    />
+  )
+
   if (fase === 'fechada') return <ClosedScreen mesaNum={mesa.numero} />
 
   if (fase === 'welcome') return (
@@ -1060,7 +1319,7 @@ export default function QRMenuPage() {
         <RoshModal
           product={roshProduct}
           essencias={essencias}
-          onConfirm={(config) => addRosh(roshProduct, config)}
+          onConfirm={(config, additions) => addRosh(roshProduct, config, additions)}
           onClose={() => setRoshProduct(null)}
         />
       )}
@@ -1123,7 +1382,7 @@ export default function QRMenuPage() {
                     <p className="text-sm text-white">{item.nome}</p>
                     {item.roshConfig && (
                       <p className="text-[10px] text-gold mt-0.5 font-semibold">
-                        {item.roshConfig.tipo_mistura === 'unica'
+                        {item.roshConfig.essencias.length === 1
                           ? `Essência: ${item.roshConfig.essencias[0]?.nome ?? ''}`
                           : `Meio a meio: ${item.roshConfig.essencias.map(e => e.nome).join(' + ')}`}
                       </p>
@@ -1282,6 +1541,16 @@ export default function QRMenuPage() {
             onSolicitar={enviarSolicitacao}
           />
         )}
+
+        {/* CONTA TAB */}
+        {activeTab === 'conta' && (
+          <ContaTab
+            total={comanda?.total ?? 0}
+            totalPago={comanda?.total_pago ?? 0}
+            pagamentos={pagamentos}
+            pedidos={meusPedidos}
+          />
+        )}
       </div>
 
       {/* ── Bottom navigation ── */}
@@ -1298,12 +1567,13 @@ export default function QRMenuPage() {
         )}
 
         {/* Tabs */}
-        <div className="grid grid-cols-3 border-t border-ink-border"
+        <div className="grid grid-cols-4 border-t border-ink-border"
           style={{ background: 'rgba(8,8,8,0.97)', backdropFilter: 'blur(12px)' }}>
           {([
             { key: 'cardapio', label: 'Cardápio', Icon: BookOpen, badge: undefined as number | undefined },
             { key: 'pedidos',  label: 'Pedidos',  Icon: Clock, badge: activePedidos.length as number | undefined },
             { key: 'solicitar',label: 'Solicitar', Icon: Bell, badge: undefined as number | undefined },
+            { key: 'conta',    label: 'Conta',    Icon: Wallet, badge: undefined as number | undefined },
           ]).map(({ key, label, Icon, badge }) => (
             <button key={key} onClick={() => setActiveTab(key as Tab)}
               className={`flex flex-col items-center gap-1 py-3 transition relative

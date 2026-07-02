@@ -2,20 +2,23 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, ClipboardList,
   ShoppingBag, Package, Settings, LogOut,
-  Menu, X, Sun, Moon, Landmark, Users, BookOpen, ChefHat, BarChart2,
+  Menu, X, Sun, Moon, Landmark, Users, BookOpen, ChefHat, BarChart2, BellRing,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
 import { NotificationBell } from './ui/NotificationBell'
+import { useToast } from './ui/Toast'
+import { playSound } from '../lib/sound'
 
 const navItems = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard', roles: [] },
   { to: '/mesas',    icon: LayoutGrid,      label: 'Mesas',     roles: [] },
   { to: '/caixa',    icon: Landmark,        label: 'Caixa',     roles: ['admin', 'caixa'] },
   { to: '/pedidos',   icon: ClipboardList,   label: 'Pedidos',   roles: [] },
-  { to: '/producao',  icon: ChefHat,         label: 'Produção',  roles: [] },
+  { to: '/producao',     icon: ChefHat,     label: 'Produção',     roles: [] },
+  { to: '/solicitacoes', icon: BellRing,    label: 'Solicitações', roles: [] },
   { to: '/produtos', icon: ShoppingBag,     label: 'Produtos',  roles: [] },
   { to: '/estoque',  icon: Package,         label: 'Estoque',   roles: ['admin', 'caixa'] },
   { to: '/clientes', icon: Users,           label: 'Clientes',  roles: [] },
@@ -30,6 +33,38 @@ export function Layout({ children }: { children: ReactNode }) {
   const { profile } = useAuth()
   const { theme, toggle } = useTheme()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [pendingSolicCount, setPendingSolicCount] = useState(0)
+  const { warning: toastWarning } = useToast()
+  const soundReadyRef = useRef(false)
+
+  useEffect(() => {
+    // Load initial pending count
+    supabase
+      .from('mesa_solicitacoes')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pendente')
+      .then(({ count }) => { setPendingSolicCount(count ?? 0) })
+
+    const ch = supabase
+      .channel('layout-solicitacoes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mesa_solicitacoes' }, payload => {
+        setPendingSolicCount(n => n + 1)
+        if (soundReadyRef.current) {
+          playSound('request')
+          toastWarning(`Nova solicitação — Mesa ${(payload.new as any).mesa_numero ?? ''}`)
+        }
+        soundReadyRef.current = true
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mesa_solicitacoes' }, payload => {
+        const updated = payload.new as any
+        if (updated.status === 'atendido') {
+          setPendingSolicCount(n => Math.max(0, n - 1))
+        }
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(ch) }
+  }, [toastWarning])
 
   async function logout() {
     await supabase.auth.signOut()
@@ -70,6 +105,12 @@ export function Layout({ children }: { children: ReactNode }) {
             <Link key={to} to={to} className={`sidebar-item ${isActive(to) ? 'active' : ''}`}>
               <Icon size={15} className="shrink-0" />
               {label}
+              {to === '/solicitacoes' && pendingSolicCount > 0 && (
+                <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{ background: 'var(--red, #ef4444)', color: '#fff', minWidth: 18, textAlign: 'center' }}>
+                  {pendingSolicCount}
+                </span>
+              )}
             </Link>
           ))}
         </nav>
@@ -131,6 +172,12 @@ export function Layout({ children }: { children: ReactNode }) {
                 <Link key={to} to={to} onClick={() => setDrawerOpen(false)}
                   className={`sidebar-item ${isActive(to) ? 'active' : ''}`}>
                   <Icon size={15} /> {label}
+                  {to === '/solicitacoes' && pendingSolicCount > 0 && (
+                    <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                      style={{ background: 'var(--red, #ef4444)', color: '#fff', minWidth: 18, textAlign: 'center' }}>
+                      {pendingSolicCount}
+                    </span>
+                  )}
                 </Link>
               ))}
             </nav>
@@ -155,9 +202,17 @@ export function Layout({ children }: { children: ReactNode }) {
           const active = isActive(to)
           return (
             <Link key={to} to={to}
-              className="flex-1 flex flex-col items-center py-2.5 text-[10px] font-semibold transition"
+              className="flex-1 flex flex-col items-center py-2.5 text-[10px] font-semibold transition relative"
               style={{ color: active ? 'var(--gold)' : 'var(--text-muted)' }}>
-              <Icon size={19} className="mb-0.5" />
+              <div className="relative">
+                <Icon size={19} className="mb-0.5" />
+                {to === '/solicitacoes' && pendingSolicCount > 0 && (
+                  <span className="absolute -top-1 -right-2 text-[9px] font-bold px-1 rounded-full"
+                    style={{ background: 'var(--red, #ef4444)', color: '#fff', lineHeight: '14px', minWidth: 14, textAlign: 'center' }}>
+                    {pendingSolicCount}
+                  </span>
+                )}
+              </div>
               {label}
             </Link>
           )

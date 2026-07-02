@@ -343,7 +343,7 @@ export default function ComandaPage() {
                         )}
                         {item.rosh_config && (
                           <p className="text-[10px] mt-0.5 font-semibold" style={{ color: 'var(--gold)' }}>
-                            {item.rosh_config.tipo_mistura === 'unica'
+                            {item.rosh_config.essencias.length === 1
                               ? `Essência: ${item.rosh_config.essencias[0]?.nome ?? ''}`
                               : `Meio a meio: ${item.rosh_config.essencias.map(e => e.nome).join(' + ')}`}
                           </p>
@@ -471,7 +471,7 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
   const { profile } = useAuth()
   const [categories, setCategories] = useState<Categoria[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [essencias, setEssencias] = useState<{ id: number; nome: string }[]>([])
+  const [essencias, setEssencias] = useState<{ id: number; nome: string; preco_adicional_rosh: number }[]>([])
   const [optionGroupsMap, setOptionGroupsMap] = useState<Record<number, GroupWithOptions[]>>({})
   const [selCat, setSelCat] = useState<number | null>(null)
   const [cart, setCart] = useState<CartItem[]>([])
@@ -489,11 +489,11 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
     Promise.all([
       supabase.from('categorias').select('*').eq('exibe_cardapio', true).order('ordem'),
       supabase.from('products').select('*').eq('active', true).eq('exibe_cardapio', true).gt('stock_quantity', 0).order('nome'),
-      supabase.from('products').select('id, nome').eq('is_insumo_rosh', true).eq('active', true).order('nome'),
+      supabase.from('products').select('id, nome, preco_adicional_rosh').eq('is_essencia', true).eq('active', true).order('nome'),
     ]).then(async ([{ data: cats }, { data: prods }, { data: ess }]) => {
       setCategories(cats ?? [])
       setProducts(prods ?? [])
-      setEssencias((ess ?? []) as { id: number; nome: string }[])
+      setEssencias((ess ?? []) as { id: number; nome: string; preco_adicional_rosh: number }[])
       if (cats?.[0]) setSelCat(cats[0].id)
 
       // Load option groups for all active products
@@ -570,11 +570,12 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
 
   function addRosh(p: Product, roshConfig: RoshConfig) {
     const essKey = roshConfig.essencias.map(e => e.id).sort().join(',')
-    const cartKey = `${p.id}-rosh-${roshConfig.tipo_mistura}-${essKey}`
+    const cartKey = `${p.id}-rosh-${essKey}`
+    const priceAdditions = roshConfig.essencias.reduce((sum, e) => sum + (e.preco_adicional ?? 0), 0)
     setCart(c => {
       const ex = c.find(i => i.cartKey === cartKey)
       if (ex) return c.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + 1 } : i)
-      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions: 0, qty: 1, is_rosh: true, selectedOptions: [], roshConfig }]
+      return [...c, { cartKey, id: p.id, nome: p.nome, preco: p.preco, priceAdditions, qty: 1, is_rosh: true, selectedOptions: [], roshConfig }]
     })
     setPendingRosh(null)
   }
@@ -785,7 +786,7 @@ function AddOrderForm({ comandaId, mesaId, onDone }: { comandaId: number; mesaId
                 <span style={{ color: 'var(--text-primary)' }}>{i.qty}× {i.nome}</span>
                 {i.roshConfig && (
                   <p className="text-[10px] mt-0.5 font-semibold" style={{ color: 'var(--gold)' }}>
-                    {i.roshConfig.tipo_mistura === 'unica'
+                    {i.roshConfig.essencias.length === 1
                       ? `Essência: ${i.roshConfig.essencias[0]?.nome ?? ''}`
                       : `Meio a meio: ${i.roshConfig.essencias.map(e => e.nome).join(' + ')}`}
                   </p>
@@ -1033,12 +1034,14 @@ function RoshModal({
   product, essencias, onConfirm, onClose,
 }: {
   product: Product
-  essencias: { id: number; nome: string }[]
+  essencias: { id: number; nome: string; preco_adicional_rosh: number }[]
   onConfirm: (config: RoshConfig) => void
   onClose: () => void
 }) {
   const [modo, setModo] = useState<'unica' | 'meio_a_meio' | null>(null)
   const [selected, setSelected] = useState<number[]>([])
+
+  const sessaoGramas = (product as any).quantidade_total_essencia ?? 10
 
   function toggle(id: number) {
     if (modo === 'unica') {
@@ -1056,13 +1059,19 @@ function RoshModal({
 
   function confirm() {
     if (!canConfirm || !modo) return
+    const percentual = modo === 'unica' ? 100 : 50
     onConfirm({
-      tipo_mistura: modo,
-      essencias: selected.map(id => ({
-        id,
-        nome: essencias.find(e => e.id === id)?.nome ?? '',
-        percentual: modo === 'unica' ? 100 : 50,
-      })),
+      sessao_gramas_total: sessaoGramas,
+      essencias: selected.map(id => {
+        const ess = essencias.find(e => e.id === id)!
+        return {
+          id,
+          nome: ess.nome,
+          percentual,
+          gramas: sessaoGramas * (percentual / 100),
+          preco_adicional: ess.preco_adicional_rosh,
+        }
+      }),
     })
   }
 

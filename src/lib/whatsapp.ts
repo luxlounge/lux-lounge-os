@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { buildSessionUrl } from './url'
 
 export type WppProvider = 'evolution' | 'zapi' | 'twilio'
 
@@ -25,10 +26,6 @@ async function fetchConfig(): Promise<WppConfig | null> {
   return data ?? null
 }
 
-function buildSessionUrl(sessionToken: string): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  return `${origin}/q/${sessionToken}`
-}
 
 async function sendViaEvolution(cfg: WppConfig, phone: string, message: string): Promise<void> {
   if (!cfg.instance_url || !cfg.api_key || !cfg.instance_name) {

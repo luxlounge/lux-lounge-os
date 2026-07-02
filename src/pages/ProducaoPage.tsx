@@ -4,6 +4,7 @@ import { Spinner } from '../components/ui/Spinner'
 import { Wind, Coffee, Printer, Search, Clock, CheckCircle2 } from 'lucide-react'
 import { format, startOfDay } from 'date-fns'
 import { buildPrintTicket, printTicket } from '../lib/printTicket'
+import { playSound } from '../lib/sound'
 
 type Setor = 'BAR' | 'NARGUILE'
 type View = 'fila' | 'concluidos'
@@ -18,8 +19,9 @@ interface ProdItem {
     addons: { addon_nome: string; price_delta: number }[]
   } | null
   rosh_config: {
-    tipo_mistura: 'unica' | 'meio_a_meio'
-    essencias: { id: number; nome: string; percentual: number }[]
+    tipo_mistura?: 'unica' | 'meio_a_meio'
+    sessao_gramas_total?: number
+    essencias: { id: number; nome: string; percentual: number; gramas?: number; preco_adicional?: number }[]
   } | null
   products: { production_sector: string | null } | null
 }
@@ -62,7 +64,7 @@ function formatElapsed(m: number): string {
 function getRoshDisplay(item: ProdItem): { label: string; value: string } | null {
   if (item.rosh_config) {
     const cfg = item.rosh_config
-    if (cfg.tipo_mistura === 'meio_a_meio') {
+    if (cfg.essencias.length >= 2) {
       return { label: 'Meio a meio', value: cfg.essencias.map(e => e.nome).join(' + ') }
     }
     return { label: 'Essência', value: cfg.essencias[0]?.nome ?? '' }
@@ -78,21 +80,6 @@ function getRoshDisplay(item: ProdItem): { label: string; value: string } | null
   return null
 }
 
-function playNewOrderSound() {
-  try {
-    const ctx = new AudioContext()
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.frequency.value = 880
-    gain.gain.setValueAtTime(0.3, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
-    osc.start(ctx.currentTime)
-    osc.stop(ctx.currentTime + 0.4)
-    setTimeout(() => ctx.close(), 600)
-  } catch { /* AudioContext not available */ }
-}
 
 export default function ProducaoPage() {
   const [pedidos, setPedidos] = useState<ProdPedido[]>([])
@@ -154,7 +141,7 @@ export default function ProducaoPage() {
     )
     const prev = prevPendentesRef.current
     const hasNew = [...newPendentes].some(id => !prev.has(id))
-    if (hasNew && prev.size > 0) playNewOrderSound()
+    if (hasNew && prev.size > 0) playSound('order')
     prevPendentesRef.current = newPendentes
 
     setPedidos(mapped)

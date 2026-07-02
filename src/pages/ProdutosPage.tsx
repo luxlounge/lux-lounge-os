@@ -8,6 +8,7 @@ import { useToast } from '../components/ui/Toast'
 import {
   Plus, Edit2, Search, Wind, ShoppingBag, Upload, X, BookOpen,
   Trash2, DollarSign, ShoppingCart, Calendar, SlidersHorizontal, Layers,
+  Link, ChevronDown, ChevronUp,
 } from 'lucide-react'
 
 // Local types for composite builder modal
@@ -63,14 +64,25 @@ export default function ProdutosPage() {
   const [form, setForm] = useState({
     nome: '', categoria_id: '', preco: '', stock_quantity: '', cost_price: '0',
     unit_type: 'unit', package_quantity: '1',
-    active: true, is_rosh: false, carvao_por_rosh: '2', exibe_cardapio: true,
+    active: true, is_rosh: false, is_essencia: false, is_carvao: false,
+    carvao_por_rosh: '2', exibe_cardapio: true,
     product_type: 'simples' as ProductType,
+    preco_adicional_rosh: '0',
+    quantidade_total_essencia: '10',
+    carvao_product_id: '',
   })
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [carvaoProducts, setCarvaoProducts] = useState<{ id: number; nome: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [uploadingImg, setUploadingImg] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Image URL paste state
+  const [imgUrlInput, setImgUrlInput] = useState('')
+  const [imgDownloading, setImgDownloading] = useState(false)
+  const [imgUrlMode, setImgUrlMode] = useState(false)
 
   // Recipe modal
   const [recipeOpen, setRecipeOpen] = useState(false)
@@ -117,12 +129,14 @@ export default function ProdutosPage() {
   const [savingOption, setSavingOption] = useState<number | null>(null)
 
   const load = useCallback(async () => {
-    const [{ data: ps }, { data: cats }] = await Promise.all([
+    const [{ data: ps }, { data: cats }, { data: carvoes }] = await Promise.all([
       supabase.from('products').select('*, categorias(*)').order('nome'),
       supabase.from('categorias').select('*').order('ordem'),
+      supabase.from('products').select('id, nome').eq('is_carvao', true).eq('active', true).order('nome'),
     ])
     setProducts(ps ?? [])
     setCategories(cats ?? [])
+    setCarvaoProducts(carvoes ?? [])
     setLoading(false)
   }, [])
 
@@ -133,11 +147,14 @@ export default function ProdutosPage() {
     setForm({
       nome: '', categoria_id: categories[0]?.id?.toString() ?? '', preco: '', stock_quantity: '0',
       cost_price: '0', unit_type: 'unit', package_quantity: '1',
-      active: true, is_rosh: false, carvao_por_rosh: '2', exibe_cardapio: true,
-      product_type: 'simples',
+      active: true, is_rosh: false, is_essencia: false, is_carvao: false,
+      carvao_por_rosh: '2', exibe_cardapio: true, product_type: 'simples',
+      preco_adicional_rosh: '0', quantidade_total_essencia: '10', carvao_product_id: '',
     })
+    setAdvancedOpen(false)
     setImageFile(null)
     setImagePreview(null)
+    resetImgSearch()
     setModalOpen(true)
   }
 
@@ -147,11 +164,17 @@ export default function ProdutosPage() {
       nome: p.nome, categoria_id: String(p.categoria_id ?? ''), preco: String(p.preco),
       stock_quantity: String(p.stock_quantity), cost_price: String(p.cost_price ?? 0),
       unit_type: p.unit_type ?? 'unit', package_quantity: String(p.package_quantity ?? 1),
-      active: p.active, is_rosh: p.is_rosh, carvao_por_rosh: String(p.carvao_por_rosh),
+      active: p.active, is_rosh: p.is_rosh, is_essencia: p.is_essencia ?? false,
+      is_carvao: p.is_carvao ?? false, carvao_por_rosh: String(p.carvao_por_rosh),
       exibe_cardapio: p.exibe_cardapio, product_type: (p.product_type ?? 'simples') as ProductType,
+      preco_adicional_rosh: String(p.preco_adicional_rosh ?? 0),
+      quantidade_total_essencia: String(p.quantidade_total_essencia ?? 10),
+      carvao_product_id: p.carvao_product_id ? String(p.carvao_product_id) : '',
     })
+    setAdvancedOpen(false)
     setImageFile(null)
     setImagePreview(p.imagem_url ?? null)
+    resetImgSearch()
     setModalOpen(true)
   }
 
@@ -160,12 +183,37 @@ export default function ProdutosPage() {
     if (!file) return
     setImageFile(file)
     setImagePreview(URL.createObjectURL(file))
+    resetImgSearch()
   }
 
   function removeImage() {
     setImageFile(null)
     setImagePreview(null)
     if (fileRef.current) fileRef.current.value = ''
+  }
+
+  function resetImgSearch() {
+    setImgUrlInput('')
+    setImgUrlMode(false)
+  }
+
+  async function downloadAndSelectImage(url: string) {
+    setImgDownloading(true)
+    try {
+      const res = await fetch(url, { mode: 'cors' })
+      if (!res.ok) throw new Error('download failed')
+      const blob = await res.blob()
+      const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+      const file = new File([blob], `product.${ext}`, { type: blob.type })
+      setImageFile(file)
+      setImagePreview(URL.createObjectURL(file))
+      setImgUrlMode(false)
+      setImgUrlInput('')
+    } catch {
+      toastError('Não foi possível baixar esta imagem. Tente outra ou use upload manual.')
+    } finally {
+      setImgDownloading(false)
+    }
   }
 
   async function uploadImage(productId: number): Promise<string | null> {
@@ -192,9 +240,15 @@ export default function ProdutosPage() {
       package_quantity: parseFloat(form.package_quantity.replace(',', '.')) || 1,
       active: form.active,
       is_rosh: form.is_rosh,
+      is_essencia: form.is_essencia,
+      is_carvao: form.is_carvao,
+      is_insumo_rosh: form.is_essencia || form.is_carvao, // backward compat
       carvao_por_rosh: parseInt(form.carvao_por_rosh),
       exibe_cardapio: form.exibe_cardapio,
       product_type: form.product_type,
+      preco_adicional_rosh: parseFloat(form.preco_adicional_rosh) || 0,
+      quantidade_total_essencia: parseFloat(form.quantidade_total_essencia) || 10,
+      carvao_product_id: form.carvao_product_id ? parseInt(form.carvao_product_id) : null,
     }
 
     let productId: number
@@ -712,30 +766,92 @@ export default function ProdutosPage() {
       {/* Edit / Create Modal */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Editar Produto' : 'Novo Produto'}>
         <div className="space-y-4">
-          {/* Image upload */}
+
+          {/* ── FIRST FOLD: always visible ── */}
+
+          {/* Image */}
           <div>
             <label className="label">Imagem</label>
             {imagePreview ? (
-              <div className="relative w-24 h-24">
-                <img src={imagePreview} alt="" className="w-24 h-24 rounded-xl object-cover" />
-                <button onClick={removeImage}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: 'var(--red)', color: '#fff' }}>
-                  <X size={10} />
+              <div className="flex items-start gap-3">
+                <div className="relative shrink-0">
+                  <img src={imagePreview} alt="" className="w-24 h-24 rounded-xl object-cover"
+                    style={{ border: '1px solid var(--border-default)' }} />
+                  <button onClick={removeImage}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center"
+                    style={{ background: 'var(--red)', color: '#fff' }}>
+                    <X size={10} />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <button onClick={() => window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(form.nome)}`, '_blank')}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition"
+                    style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>
+                    🔍 Buscar no Google
+                  </button>
+                  <button onClick={() => fileRef.current?.click()}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition"
+                    style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>
+                    <Upload size={12} /> Upload manual
+                  </button>
+                </div>
+              </div>
+            ) : imgUrlMode ? (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    className="input flex-1 text-sm"
+                    placeholder="Cole a URL da imagem…"
+                    value={imgUrlInput}
+                    onChange={e => setImgUrlInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && imgUrlInput.trim()) downloadAndSelectImage(imgUrlInput.trim()) }}
+                  />
+                  <button
+                    onClick={() => downloadAndSelectImage(imgUrlInput.trim())}
+                    disabled={!imgUrlInput.trim() || imgDownloading}
+                    className="px-3 py-2 rounded-xl text-sm font-semibold transition"
+                    style={{ background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', color: 'var(--gold)' }}>
+                    {imgDownloading ? <Spinner size={14} /> : 'Usar'}
+                  </button>
+                </div>
+                <button onClick={() => setImgUrlMode(false)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg transition"
+                  style={{ color: 'var(--text-muted)' }}>
+                  Cancelar
                 </button>
               </div>
             ) : (
-              <button onClick={() => fileRef.current?.click()}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition w-full justify-center"
-                style={{ border: '1px dashed var(--border-strong)', color: 'var(--text-muted)', background: 'var(--bg-raised)' }}>
-                <Upload size={14} /> Selecionar imagem
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(form.nome || 'produto')}`, '_blank')}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition flex-1 justify-center"
+                  style={{ background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', color: 'var(--gold)' }}>
+                  🔍 Buscar no Google
+                </button>
+                <button onClick={() => setImgUrlMode(true)}
+                  title="Colar URL"
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition"
+                  style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>
+                  <Link size={14} />
+                </button>
+                <button onClick={() => fileRef.current?.click()}
+                  title="Upload manual"
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition"
+                  style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>
+                  <Upload size={14} />
+                </button>
+              </div>
             )}
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onImageChange} />
           </div>
 
-          <div><label className="label">Nome *</label><input className="input" value={form.nome} onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} /></div>
+          {/* Nome */}
+          <div>
+            <label className="label">Nome *</label>
+            <input className="input" value={form.nome} onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} />
+          </div>
 
+          {/* Categoria + Preço — always visible */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Categoria</label>
@@ -743,84 +859,133 @@ export default function ProdutosPage() {
                 {categories.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
               </select>
             </div>
-            <div><label className="label">Preço Venda (R$)</label><input className="input" placeholder="0,00" value={form.preco} onChange={e => setForm(f => ({ ...f, preco: e.target.value }))} /></div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="label">Custo (R$)</label><input className="input" placeholder="0,00" value={form.cost_price} onChange={e => setForm(f => ({ ...f, cost_price: e.target.value }))} /></div>
-            <div><label className="label">Estoque</label><input type="number" className="input" value={form.stock_quantity} onChange={e => setForm(f => ({ ...f, stock_quantity: e.target.value }))} /></div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Unidade</label>
-              <select className="input" value={form.unit_type} onChange={e => setForm(f => ({ ...f, unit_type: e.target.value }))}>
-                {Object.entries(UNIT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              <label className="label">Preço Venda (R$) *</label>
+              <input className="input" placeholder="0,00" value={form.preco} onChange={e => setForm(f => ({ ...f, preco: e.target.value }))} />
             </div>
-            <div><label className="label">Qtd/Embalagem</label><input className="input" placeholder="1" value={form.package_quantity} onChange={e => setForm(f => ({ ...f, package_quantity: e.target.value }))} /></div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-2 justify-end pb-1">
-              {[{ key: 'active', label: 'Ativo' }, { key: 'is_rosh', label: 'É Rosh' }, { key: 'exibe_cardapio', label: 'Cardápio' }].map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={form[key as keyof typeof form] as boolean} onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))}
-                    className="w-3.5 h-3.5" style={{ accentColor: 'var(--gold)' }} />
-                  {label}
-                </label>
-              ))}
-            </div>
-            {form.is_rosh && (
-              <div><label className="label">Carvão por Rosh</label><input type="number" className="input" value={form.carvao_por_rosh} onChange={e => setForm(f => ({ ...f, carvao_por_rosh: e.target.value }))} /></div>
-            )}
-          </div>
-
-          {/* Product type */}
+          {/* ── ADVANCED SECTION: collapsible ── */}
           <div>
-            <label className="label">Tipo de Produto</label>
-            <div className="grid grid-cols-2 gap-2">
-              {(['simples', 'composto'] as ProductType[]).map(t => (
-                <button key={t} type="button" onClick={() => setForm(f => ({ ...f, product_type: t }))}
-                  className="py-2 rounded-xl text-sm font-semibold transition capitalize"
-                  style={{
-                    background: form.product_type === t ? 'var(--gold-bg)' : 'var(--bg-raised)',
-                    border: `1px solid ${form.product_type === t ? 'var(--gold-border)' : 'var(--border-default)'}`,
-                    color: form.product_type === t ? 'var(--gold)' : 'var(--text-secondary)',
-                  }}>
-                  {t === 'simples' ? 'Simples' : 'Composto (Kit)'}
-                </button>
-              ))}
-            </div>
-            {form.product_type === 'composto' && (
-              <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                Produto composto agrupado em kit. Configure a montagem após salvar.
-              </p>
+            <button type="button" onClick={() => setAdvancedOpen(v => !v)}
+              className="flex items-center gap-2 w-full text-xs font-semibold py-2 px-3 rounded-xl transition"
+              style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>
+              {advancedOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {advancedOpen ? 'Ocultar configurações avançadas' : 'Configurações avançadas'}
+            </button>
+
+            {advancedOpen && (
+              <div className="space-y-4 mt-3">
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="label">Custo (R$)</label><input className="input" placeholder="0,00" value={form.cost_price} onChange={e => setForm(f => ({ ...f, cost_price: e.target.value }))} /></div>
+                  <div><label className="label">Estoque</label><input type="number" className="input" value={form.stock_quantity} onChange={e => setForm(f => ({ ...f, stock_quantity: e.target.value }))} /></div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Unidade</label>
+                    <select className="input" value={form.unit_type} onChange={e => setForm(f => ({ ...f, unit_type: e.target.value }))}>
+                      {Object.entries(UNIT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="label">Qtd/Embalagem</label><input className="input" placeholder="1" value={form.package_quantity} onChange={e => setForm(f => ({ ...f, package_quantity: e.target.value }))} /></div>
+                </div>
+
+                {/* Tipo de Produto */}
+                <div>
+                  <label className="label">Tipo de Produto</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['simples', 'composto'] as ProductType[]).map(t => (
+                      <button key={t} type="button" onClick={() => setForm(f => ({ ...f, product_type: t }))}
+                        className="py-2 rounded-xl text-sm font-semibold transition capitalize"
+                        style={{
+                          background: form.product_type === t ? 'var(--gold-bg)' : 'var(--bg-raised)',
+                          border: `1px solid ${form.product_type === t ? 'var(--gold-border)' : 'var(--border-default)'}`,
+                          color: form.product_type === t ? 'var(--gold)' : 'var(--text-secondary)',
+                        }}>
+                        {t === 'simples' ? 'Simples' : 'Composto (Kit)'}
+                      </button>
+                    ))}
+                  </div>
+                  {form.product_type === 'composto' && (
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                      Produto composto agrupado em kit. Configure a montagem após salvar.
+                    </p>
+                  )}
+                </div>
+
+                {/* Checkboxes */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-2">
+                    {[
+                      { key: 'active',         label: 'Ativo' },
+                      { key: 'exibe_cardapio', label: 'Exibe no Cardápio' },
+                      { key: 'is_rosh',        label: 'É Sessão de Narguilé' },
+                      { key: 'is_essencia',    label: 'É Essência' },
+                      { key: 'is_carvao',      label: 'É Carvão' },
+                    ].map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                        <input type="checkbox" checked={form[key as keyof typeof form] as boolean}
+                          onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))}
+                          className="w-3.5 h-3.5" style={{ accentColor: 'var(--gold)' }} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {form.is_rosh && (
+                      <div><label className="label">Carvão por Sessão</label><input type="number" className="input" value={form.carvao_por_rosh} onChange={e => setForm(f => ({ ...f, carvao_por_rosh: e.target.value }))} /></div>
+                    )}
+                    {form.is_rosh && (
+                      <div><label className="label">Gramas de essência/sessão</label><input type="number" step="0.5" className="input" value={form.quantidade_total_essencia} onChange={e => setForm(f => ({ ...f, quantidade_total_essencia: e.target.value }))} /></div>
+                    )}
+                    {form.is_essencia && (
+                      <div><label className="label">Adicional em sessão (R$)</label><input type="number" step="0.01" className="input" placeholder="0,00" value={form.preco_adicional_rosh} onChange={e => setForm(f => ({ ...f, preco_adicional_rosh: e.target.value }))} /></div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Vínculo de carvão (só para sessões is_rosh) */}
+                {form.is_rosh && (
+                  <div>
+                    <label className="label">Produto de Carvão vinculado</label>
+                    <select className="input" value={form.carvao_product_id}
+                      onChange={e => setForm(f => ({ ...f, carvao_product_id: e.target.value }))}>
+                      <option value="">— deduzir automaticamente —</option>
+                      {carvaoProducts.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                    </select>
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                      Vínculo direto evita busca por nome. Recomendado quando há mais de um carvão em estoque.
+                    </p>
+                  </div>
+                )}
+
+                {/* Live cost/profit preview */}
+                {form.preco && (
+                  <div className="grid grid-cols-3 gap-2 rounded-xl p-3"
+                    style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-subtle)' }}>
+                    {(() => {
+                      const preco = parseFloat(form.preco.replace(',', '.')) || 0
+                      const cost = parseFloat(form.cost_price.replace(',', '.')) || 0
+                      const profit = preco - cost
+                      const margin = calcMargin(preco, cost)
+                      return [
+                        { label: 'Venda', value: fmt(preco), color: 'var(--gold)' },
+                        { label: 'Lucro', value: fmt(profit), color: profit >= 0 ? 'var(--green)' : 'var(--red)' },
+                        { label: 'Margem', value: `${margin.toFixed(0)}%`, color: margin >= 30 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)' },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="text-center">
+                          <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</p>
+                          <p className="font-mono text-xs font-bold" style={{ color }}>{value}</p>
+                        </div>
+                      ))
+                    })()}
+                  </div>
+                )}
+              </div>
             )}
           </div>
-
-          {/* Live cost/profit preview */}
-          {form.preco && (
-            <div className="grid grid-cols-3 gap-2 rounded-xl p-3"
-              style={{ background: 'var(--bg-raised)', border: '1px solid var(--border-subtle)' }}>
-              {(() => {
-                const preco = parseFloat(form.preco.replace(',', '.')) || 0
-                const cost = parseFloat(form.cost_price.replace(',', '.')) || 0
-                const profit = preco - cost
-                const margin = calcMargin(preco, cost)
-                return [
-                  { label: 'Venda', value: fmt(preco), color: 'var(--gold)' },
-                  { label: 'Lucro', value: fmt(profit), color: profit >= 0 ? 'var(--green)' : 'var(--red)' },
-                  { label: 'Margem', value: `${margin.toFixed(0)}%`, color: margin >= 30 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="text-center">
-                    <p className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</p>
-                    <p className="font-mono text-xs font-bold" style={{ color }}>{value}</p>
-                  </div>
-                ))
-              })()}
-            </div>
-          )}
 
           <button onClick={save} disabled={!form.nome || !form.preco || saving || uploadingImg} className="btn-primary w-full py-3.5">
             {saving || uploadingImg ? <Spinner size={18} /> : editing ? 'Salvar Alterações' : 'Criar Produto'}

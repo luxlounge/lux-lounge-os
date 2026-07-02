@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { sendWhatsAppWelcome } from '../lib/whatsapp'
+import { buildSessionUrl } from '../lib/url'
 import type { Mesa, Comanda, Pedido, Pagamento, Cliente } from '../types'
 import { Spinner } from '../components/ui/Spinner'
 import { SkeletonMesa } from '../components/ui/Skeleton'
@@ -34,9 +35,6 @@ function generateSessionToken(): string {
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
 
-function buildSessionUrl(sessionToken: string): string {
-  return `${window.location.origin}/q/${sessionToken}`
-}
 
 function buildWaLink(nome: string, phone: string, link: string): string {
   const msg =

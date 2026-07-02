@@ -42,7 +42,12 @@ export interface Product {
   exibe_cardapio: boolean
   is_rosh: boolean
   is_insumo_rosh: boolean
+  is_essencia: boolean
+  is_carvao: boolean
   carvao_por_rosh: number
+  preco_adicional_rosh: number
+  quantidade_total_essencia: number
+  carvao_product_id: number | null
   imagem_url: string | null
   cost_price: number
   unit_type: string
@@ -214,12 +219,15 @@ export interface CompositeConfig {
 export interface RoshEssencia {
   id: number
   nome: string
-  percentual: number
+  percentual: number       // 100 (única) | 50 (meio a meio)
+  gramas: number           // sessao_gramas_total × (percentual / 100)
+  preco_adicional: number  // snapshot do preco_adicional_rosh no momento da venda
 }
 
 export interface RoshConfig {
-  tipo_mistura: 'unica' | 'meio_a_meio'
+  sessao_gramas_total: number
   essencias: RoshEssencia[]
+  // tipo_mistura omitido — derivado de essencias.length (1=única, 2=meio a meio)
 }
 
 export interface PedidoItem {
@@ -279,6 +287,18 @@ export interface MesaSolicitacao {
   status: SolicitacaoStatus
   created_at: string
   mesas?: { id: number; numero: number }
+}
+
+export interface Avaliacao {
+  id: number
+  comanda_id: number
+  session_token: string | null
+  nota_geral: number | null
+  nota_atendimento: number | null
+  nota_produto: number | null
+  nota_ambiente: number | null
+  comentario: string | null
+  created_at: string
 }
 
 export interface EstoqueMovimento {

@@ -1,17 +1,18 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import type { Comanda, Mesa } from '../types'
+import type { Comanda, Mesa, Cliente } from '../types'
 import { Spinner } from '../components/ui/Spinner'
 import { useAuth } from '../hooks/useAuth'
 import {
   DollarSign, ChevronRight, Lock, CreditCard,
-  Banknote, Smartphone, Gift, CheckCircle, RefreshCw,
+  Banknote, Smartphone, Gift, CheckCircle, RefreshCw, Star,
 } from 'lucide-react'
 import { PageHelp } from '../components/ui/PageHelp'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { useToast } from '../components/ui/Toast'
+import { playSound } from '../lib/sound'
 
 type PayMethod = 'dinheiro' | 'pix' | 'credito' | 'debito' | 'cortesia'
 
@@ -28,6 +29,7 @@ const METHOD_LABEL: Record<PayMethod, string> = {
 
 interface ComandaAberta extends Comanda {
   mesas?: Mesa
+  clientes?: Cliente
   balance: number
 }
 
@@ -55,10 +57,12 @@ export default function CaixaPage() {
   const [payForms, setPayForms] = useState<Record<number, { amount: string; method: PayMethod }>>({})
   const [todayRevenue, setTodayRevenue] = useState(0)
 
+  const soundReadyRef = useRef(false)
+
   const load = useCallback(async () => {
     const today = new Date(); today.setHours(0, 0, 0, 0)
     const [{ data: cs }, { data: pays }] = await Promise.all([
-      supabase.from('comandas').select('*, mesas(*)').eq('status', 'aberta').order('aberta_em'),
+      supabase.from('comandas').select('*, mesas(*), clientes(*)').eq('status', 'aberta').order('aberta_em'),
       supabase.from('pagamentos').select('valor').gte('created_at', today.toISOString()),
     ])
     const list = (cs ?? []).map(c => ({ ...c, balance: c.total - c.total_pago }))
@@ -66,6 +70,7 @@ export default function CaixaPage() {
     setComandas(list)
     setTodayRevenue((pays ?? []).reduce((s, p) => s + Number(p.valor), 0))
     setLoading(false)
+    soundReadyRef.current = true
   }, [])
 
   useEffect(() => {
@@ -73,6 +78,10 @@ export default function CaixaPage() {
     const sub = supabase.channel('caixa-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comandas' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pagamentos' }, load)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pedidos' }, () => {
+        if (soundReadyRef.current) playSound('order')
+        load()
+      })
       .subscribe()
     return () => { sub.unsubscribe() }
   }, [load])
@@ -190,6 +199,9 @@ export default function CaixaPage() {
 
         {comandas.map(c => {
           const mesa = (c.mesas as any)
+          const cliente = (c.clientes as any) as Cliente | undefined
+          const isVip = cliente?.is_vip_manual
+          const isNovo = cliente && cliente.total_visits <= 1
           const form = getPayForm(c.id)
           const isPaying = payingId === c.id
           const isClosing = closingId === c.id
@@ -204,12 +216,27 @@ export default function CaixaPage() {
                 style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                 <div className="flex items-center gap-3">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
                         Mesa {mesa?.numero ?? '?'}
                       </span>
                       <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>#{c.id}</span>
+                      {isVip && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{ background: 'rgba(212,175,55,0.12)', color: 'var(--gold)', border: '1px solid rgba(212,175,55,0.25)' }}>
+                          <Star size={9} fill="currentColor" /> VIP
+                        </span>
+                      )}
+                      {!isVip && isNovo && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{ background: 'rgba(34,197,94,0.10)', color: 'var(--green)', border: '1px solid rgba(34,197,94,0.20)' }}>
+                          Novo
+                        </span>
+                      )}
                     </div>
+                    {cliente && (
+                      <p className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>{cliente.nome}</p>
+                    )}
                     <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                       Aberta {timeAgo(c.aberta_em)} · {format(new Date(c.aberta_em), 'HH:mm', { locale: ptBR })}
                     </p>
